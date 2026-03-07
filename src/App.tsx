@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import type { MouseEvent } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Settings, RefreshCw, Folder, Box, Layers, Menu, LogOut, GitBranch, ArrowDownLeft, TerminalSquare, Download } from 'lucide-react';
@@ -42,6 +42,8 @@ function App() {
     title: '',
     description: '',
   });
+  
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const fetchProjects = useCallback(async () => {
     if (!projectsDir) return;
@@ -140,11 +142,17 @@ function App() {
       description: 'Please wait while the process completes in the background.'
     });
 
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
+
     let completed = 0;
     
     // We execute them sequentially so we don't overwhelm the system and max out file handles/processes
     // while updating the progress bar natively.
     for (const p of gitProjects) {
+      if (signal.aborted) {
+        break;
+      }
       try {
         if (action === 'fetch') {
           await invoke('git_fetch', { path: p.path });
@@ -154,8 +162,16 @@ function App() {
       } catch (error) {
         console.error(`Error on project ${p.name}:`, error);
       }
+      if (signal.aborted) {
+        break;
+      }
       completed++;
       setProgressState(prev => ({ ...prev, current: completed }));
+    }
+
+    if (signal.aborted) {
+      // already handled cleanup in cancel handler
+      return;
     }
 
     // Give the UI a brief moment to show 100% completion before hiding
@@ -343,8 +359,20 @@ function App() {
                 style={{ width: `${progressState.total > 0 ? (progressState.current / progressState.total) * 100 : 0}%` }}
               ></div>
             </div>
-            <div className="text-sm font-medium text-muted-foreground">
-              Processed {progressState.current} out of {progressState.total}
+            <div className="text-sm font-medium text-muted-foreground w-full flex justify-between items-center">
+              <span>Processed {progressState.current} out of {progressState.total}</span>
+              <button 
+                onClick={() => {
+                  if (abortControllerRef.current) {
+                    abortControllerRef.current.abort();
+                  }
+                  setProgressState(prev => ({ ...prev, isOpen: false }));
+                  fetchProjects();
+                }}
+                className="text-xs text-destructive hover:underline px-2 py-1"
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </DialogContent>
