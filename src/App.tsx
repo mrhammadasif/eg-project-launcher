@@ -19,6 +19,7 @@ type Project = {
   git_status: string | null;
   git_ahead: number | null;
   git_behind: number | null;
+  sln_files?: string[] | null;
 };
 
 type ProjectGitInfo = {
@@ -30,10 +31,12 @@ type ProjectGitInfo = {
 }
 
 function App() {
-  const { projectsDir, preferredEditor, customEditorPath } = useSettingsStore();
+  const { projectsDir, preferredEditor, customEditorPath, recentSlns, setRecentSln } = useSettingsStore();
   const [projects, setProjects] = useState<Project[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  
+  const [openSlnDropdown, setOpenSlnDropdown] = useState<string | null>(null);
   
   const [progressState, setProgressState] = useState<{ isOpen: boolean, current: number, total: number, title: string, description: string }>({
     isOpen: false,
@@ -82,11 +85,15 @@ function App() {
     return () => window.removeEventListener('focus', handleFocus);
   }, [fetchProjects]);
 
-  const openProject = async (folderName: string) => {
+  const openProject = async (folderName: string, specificFile: string | null = null) => {
     const folderPath = `${projectsDir.replace(/\/$/, '')}/${folderName}`;
     const editorToUse = customEditorPath || preferredEditor;
     try {
-      await invoke('open_project', { editor: editorToUse, folderPath });
+      if (specificFile) {
+        setRecentSln(folderName, specificFile);
+      }
+      setOpenSlnDropdown(null);
+      await invoke('open_project', { editor: editorToUse, folderPath, specificFile });
     } catch (e) {
       console.error(e);
     }
@@ -199,6 +206,10 @@ function App() {
     }
   };
 
+  const shortenTheFolderName = (folderName: string) => {
+    return folderName.replace("EG.Applications.", "APP:").replace("EG.Services.", "SVC:").replace("EG.HttpAggregators.", "AGG:")
+  }
+
   return (
     <TooltipProvider delay={300}>
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
@@ -210,20 +221,46 @@ function App() {
           <CommandEmpty className="py-6 text-center text-sm">No projects found.</CommandEmpty>
           <CommandGroup heading="Projects">
             {projects.map((proj) => (
-              <CommandItem key={proj.name} onSelect={() => openProject(proj.name)} className="cursor-pointer py-2 group flex items-center justify-between">
-                <div className="flex items-center min-w-0 pr-2">
-                  {proj.project_type === 'node' ? (
-                    <Box className="mr-2 h-4 w-4 shrink-0 text-primary" />
-                  ) : proj.project_type === 'dotnet' ? (
-                    <Layers className="mr-2 h-4 w-4 shrink-0 text-blue-400" />
-                  ) : (
-                    <Folder className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
-                  )}
-                  <span className="truncate flex-1">{proj.name}</span>
-                </div>
+              <CommandItem key={proj.name} className="cursor-pointer py-2 group flex items-center justify-between">
+                {proj.project_type === 'dotnet' && proj.sln_files && proj.sln_files.length > 1 ? (
+                  <DropdownMenu open={openSlnDropdown === proj.name} onOpenChange={(o) => setOpenSlnDropdown(o ? proj.name : null)}>
+                    <DropdownMenuTrigger className="flex flex-1 items-center min-w-0 pr-2 cursor-pointer hover:text-white hover:bg-white/10 rounded px-1 py-2 outline-none text-left">
+                      <Layers className="mr-2 h-4 w-4 shrink-0 text-blue-400" />
+                      <span className="truncate flex-1">{shortenTheFolderName(proj.name)}</span>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-[380px] max-h-80 overflow-y-auto">
+                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-b mb-1">
+                        Select Solution File
+                      </div>
+                      {proj.sln_files.slice().sort((a, b) => {
+                          const rec = recentSlns[proj.name];
+                          if (a === rec) return -1;
+                          if (b === rec) return 1;
+                          return a.localeCompare(b);
+                      }).map(sln => (
+                        <DropdownMenuItem key={sln} onClick={() => openProject(proj.name, sln)} className={sln === recentSlns[proj.name] ? "bg-accent/50 selection:bg-accent/50" : ""}>
+                          <Layers className="mr-2 w-3.5 h-3.5 opacity-70" />
+                          <span className="truncate text-xs">{sln.split('/').pop() || sln}</span>
+                          {sln === recentSlns[proj.name] && <span className="ml-auto text-[10px] text-muted-foreground border px-1 rounded bg-background">Recent</span>}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : (
+                  <div onClick={() => openProject(proj.name)} className="flex flex-1 items-center min-w-0 pr-2 cursor-pointer hover:text-white hover:bg-white/10 rounded px-1 py-2">
+                    {proj.project_type === 'node' ? (
+                      <Box className="mr-2 h-4 w-4 shrink-0 text-primary" />
+                    ) : proj.project_type === 'dotnet' ? (
+                      <Layers className="mr-2 h-4 w-4 shrink-0 text-blue-400" />
+                    ) : (
+                      <Folder className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
+                    )}
+                    <span className="truncate flex-1 " >{shortenTheFolderName(proj.name)}</span>
+                  </div>
+                )}
 
                 <div className="flex items-center shrink-0">
-                  <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity mr-2 shrink-0">
+                  <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                     {proj.has_git && (
                       <>
                         <Tooltip>
@@ -235,7 +272,7 @@ function App() {
 
                         <Tooltip>
                           <TooltipTrigger className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex">
-                            <ArrowDownLeft strokeWidth={1.5} className="w-3.5 h-3.5 text-muted-foreground" onClick={(e) => executeGitAction(e, 'pull', proj.path)} />
+                            <Download strokeWidth={1.5} className="w-3.5 h-3.5 text-muted-foreground" onClick={(e) => executeGitAction(e, 'pull', proj.path)} />
                           </TooltipTrigger>
                           <TooltipContent><p className="text-xs">Pull</p></TooltipContent>
                         </Tooltip>

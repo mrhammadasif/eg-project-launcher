@@ -13,6 +13,7 @@ struct Project {
     git_status: Option<String>, // "clean", "dirty", "ahead", "behind"
     git_ahead: Option<u32>,
     git_behind: Option<u32>,
+    sln_files: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -24,9 +25,9 @@ struct ProjectGitInfo {
     git_behind: Option<u32>,
 }
 
-fn determine_project_type(path: &std::path::Path) -> String {
+fn determine_project_type(path: &std::path::Path) -> (String, Vec<String>) {
     let mut has_package_json = false;
-    let mut has_sln = false;
+    let mut sln_files = Vec::new();
 
     let dirs_to_check = vec![path.to_path_buf(), path.join("src")];
     
@@ -39,7 +40,7 @@ fn determine_project_type(path: &std::path::Path) -> String {
                         if name == "package.json" {
                             has_package_json = true;
                         } else if name.ends_with(".sln") || name.ends_with(".slnx") {
-                            has_sln = true;
+                            sln_files.push(entry.path().to_string_lossy().to_string());
                         }
                     } else if file_type.is_dir() && dir == path.join("src") {
                         if let Ok(sub_entries) = std::fs::read_dir(entry.path()) {
@@ -48,7 +49,7 @@ fn determine_project_type(path: &std::path::Path) -> String {
                                 if sub_name == "package.json" {
                                     has_package_json = true;
                                 } else if sub_name.ends_with(".sln") || sub_name.ends_with(".slnx") {
-                                    has_sln = true;
+                                    sln_files.push(sub_entry.path().to_string_lossy().to_string());
                                 }
                             }
                         }
@@ -57,13 +58,15 @@ fn determine_project_type(path: &std::path::Path) -> String {
             }
         }
     }
+    
+    sln_files.sort();
 
-    if has_sln {
-        "dotnet".to_string()
+    if !sln_files.is_empty() {
+        ("dotnet".to_string(), sln_files)
     } else if has_package_json {
-        "node".to_string()
+        ("node".to_string(), sln_files)
     } else {
-        "unknown".to_string()
+        ("unknown".to_string(), sln_files)
     }
 }
 
@@ -160,7 +163,7 @@ fn get_projects(root_path: String) -> Result<Vec<Project>, String> {
                     if let Ok(name) = entry.file_name().into_string() {
                         if !name.starts_with('.') {
                             let project_path = entry.path();
-                            let project_type = determine_project_type(&project_path);
+                            let (project_type, sln_files) = determine_project_type(&project_path);
                             
                             projects.push(Project { 
                                 name, 
@@ -171,6 +174,7 @@ fn get_projects(root_path: String) -> Result<Vec<Project>, String> {
                                 git_status: None,
                                 git_ahead: None,
                                 git_behind: None,
+                                sln_files: if sln_files.is_empty() { None } else { Some(sln_files) },
                             });
                         }
                     }
@@ -201,7 +205,7 @@ fn quit_app() {
 }
 
 #[tauri::command]
-fn open_project(app: tauri::AppHandle, editor: String, folder_path: String) -> Result<(), String> {
+fn open_project(app: tauri::AppHandle, editor: String, folder_path: String, specific_file: Option<String>) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
@@ -215,46 +219,51 @@ fn open_project(app: tauri::AppHandle, editor: String, folder_path: String) -> R
     let mut final_editor = editor;
     let mut open_target = path.clone();
 
-    // Check directory contents for specific project structures
-    if let Ok(src_entries) = std::fs::read_dir(std::path::Path::new(&path).join("src")) {
-        let mut has_package_json = false;
-        let mut sln_file = None;
+    if let Some(specific) = specific_file {
+        final_editor = "Rider".to_string();
+        open_target = specific;
+    } else {
+        // Check directory contents for specific project structures
+        if let Ok(src_entries) = std::fs::read_dir(std::path::Path::new(&path).join("src")) {
+            let mut has_package_json = false;
+            let mut sln_file = None;
 
-        for entry in src_entries.flatten() {
-            if let Ok(file_type) = entry.file_type() {
-                let file_name_str = entry.file_name().to_string_lossy().to_string();
-                
-                // Check direct children of src for package.json or .sln/.slnx
-                if file_type.is_file() {
-                    if file_name_str == "package.json" {
-                        has_package_json = true;
-                    } else if file_name_str.ends_with(".sln") || file_name_str.ends_with(".slnx") {
-                        sln_file = Some(entry.path());
-                    }
-                } 
-                // Check one level deep inside src for subdirectories
-                else if file_type.is_dir() {
-                    if let Ok(sub_entries) = std::fs::read_dir(entry.path()) {
-                        for sub_entry in sub_entries.flatten() {
-                            let sub_name = sub_entry.file_name().to_string_lossy().to_string();
-                            if sub_name == "package.json" {
-                                has_package_json = true;
-                                open_target = entry.path().to_string_lossy().to_string();
-                            } else if sub_name.ends_with(".sln") || sub_name.ends_with(".slnx") {
-                                sln_file = Some(sub_entry.path());
+            for entry in src_entries.flatten() {
+                if let Ok(file_type) = entry.file_type() {
+                    let file_name_str = entry.file_name().to_string_lossy().to_string();
+                    
+                    // Check direct children of src for package.json or .sln/.slnx
+                    if file_type.is_file() {
+                        if file_name_str == "package.json" {
+                            has_package_json = true;
+                        } else if file_name_str.ends_with(".sln") || file_name_str.ends_with(".slnx") {
+                            sln_file = Some(entry.path());
+                        }
+                    } 
+                    // Check one level deep inside src for subdirectories
+                    else if file_type.is_dir() {
+                        if let Ok(sub_entries) = std::fs::read_dir(entry.path()) {
+                            for sub_entry in sub_entries.flatten() {
+                                let sub_name = sub_entry.file_name().to_string_lossy().to_string();
+                                if sub_name == "package.json" {
+                                    has_package_json = true;
+                                    open_target = entry.path().to_string_lossy().to_string();
+                                } else if sub_name.ends_with(".sln") || sub_name.ends_with(".slnx") {
+                                    sln_file = Some(sub_entry.path());
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        if let Some(sln_path) = sln_file {
-            final_editor = "Rider".to_string();
-            // Open the specific solution file using Rider
-            open_target = sln_path.to_string_lossy().to_string();
-        } else if has_package_json {
-            final_editor = "Cursor".to_string();
+            if let Some(sln_path) = sln_file {
+                final_editor = "Rider".to_string();
+                // Open the specific solution file using Rider
+                open_target = sln_path.to_string_lossy().to_string();
+            } else if has_package_json {
+                final_editor = "Cursor".to_string();
+            }
         }
     }
 
