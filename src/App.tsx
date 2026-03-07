@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import type { MouseEvent } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Settings, RefreshCw, Folder, Box, Layers, Menu, LogOut, GitBranch, ArrowDownLeft, TerminalSquare, Download } from 'lucide-react';
 import { useSettingsStore } from './store';
@@ -99,7 +98,8 @@ function App() {
     }
   };
 
-  const executeGitAction = async (e: MouseEvent, action: string, path: string) => {
+  const executeGitAction = async (e: React.MouseEvent | React.PointerEvent, action: string, path: string) => {
+    e.preventDefault();
     e.stopPropagation();
     try {
       if (action === 'tower') {
@@ -264,22 +264,34 @@ function App() {
                     {proj.has_git && (
                       <>
                         <Tooltip>
-                          <TooltipTrigger className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex">
-                            <ArrowDownLeft strokeDasharray="2 2" strokeWidth={1.5} className="w-3.5 h-3.5 text-muted-foreground" onClick={(e) => executeGitAction(e, 'fetch', proj.path)} />
+                          <TooltipTrigger 
+                            className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex outline-none" 
+                            onClick={(e) => executeGitAction(e, 'fetch', proj.path)}
+                            onPointerDown={(e) => e.stopPropagation()}
+                          >
+                            <ArrowDownLeft strokeDasharray="2 2" strokeWidth={1.5} className="w-3.5 h-3.5" />
                           </TooltipTrigger>
                           <TooltipContent><p className="text-xs">Fetch</p></TooltipContent>
                         </Tooltip>
 
                         <Tooltip>
-                          <TooltipTrigger className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex">
-                            <Download strokeWidth={1.5} className="w-3.5 h-3.5 text-muted-foreground" onClick={(e) => executeGitAction(e, 'pull', proj.path)} />
+                          <TooltipTrigger 
+                            className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex outline-none" 
+                            onClick={(e) => executeGitAction(e, 'pull', proj.path)}
+                            onPointerDown={(e) => e.stopPropagation()}
+                          >
+                            <Download strokeWidth={1.5} className="w-3.5 h-3.5" />
                           </TooltipTrigger>
                           <TooltipContent><p className="text-xs">Pull</p></TooltipContent>
                         </Tooltip>
 
                         <Tooltip>
-                          <TooltipTrigger className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-blue-400 inline-flex">
-                            <TerminalSquare strokeWidth={1.5} className="w-3.5 h-3.5" onClick={(e) => executeGitAction(e, 'tower', proj.path)} />
+                          <TooltipTrigger 
+                            className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-blue-400 inline-flex outline-none" 
+                            onClick={(e) => executeGitAction(e, 'tower', proj.path)}
+                            onPointerDown={(e) => e.stopPropagation()}
+                          >
+                            <TerminalSquare strokeWidth={1.5} className="w-3.5 h-3.5" />
                           </TooltipTrigger>
                           <TooltipContent><p className="text-xs">Open in Tower</p></TooltipContent>
                         </Tooltip>
