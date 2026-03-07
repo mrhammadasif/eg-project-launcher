@@ -1,5 +1,5 @@
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
-use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState, TrayIconEvent};
 
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +30,7 @@ fn determine_project_type(path: &std::path::Path) -> (String, Vec<String>) {
     let mut sln_files = Vec::new();
 
     let dirs_to_check = vec![path.to_path_buf(), path.join("src")];
-    
+
     for dir in dirs_to_check {
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {
@@ -48,7 +48,8 @@ fn determine_project_type(path: &std::path::Path) -> (String, Vec<String>) {
                                 let sub_name = sub_entry.file_name().to_string_lossy().to_string();
                                 if sub_name == "package.json" {
                                     has_package_json = true;
-                                } else if sub_name.ends_with(".sln") || sub_name.ends_with(".slnx") {
+                                } else if sub_name.ends_with(".sln") || sub_name.ends_with(".slnx")
+                                {
                                     sln_files.push(sub_entry.path().to_string_lossy().to_string());
                                 }
                             }
@@ -58,7 +59,7 @@ fn determine_project_type(path: &std::path::Path) -> (String, Vec<String>) {
             }
         }
     }
-    
+
     sln_files.sort();
 
     if !sln_files.is_empty() {
@@ -70,7 +71,15 @@ fn determine_project_type(path: &std::path::Path) -> (String, Vec<String>) {
     }
 }
 
-fn get_git_info(path: &std::path::Path) -> (bool, Option<String>, Option<String>, Option<u32>, Option<u32>) {
+fn get_git_info(
+    path: &std::path::Path,
+) -> (
+    bool,
+    Option<String>,
+    Option<String>,
+    Option<u32>,
+    Option<u32>,
+) {
     let git_dir = path.join(".git");
     if !git_dir.exists() {
         return (false, None, None, None, None);
@@ -83,12 +92,16 @@ fn get_git_info(path: &std::path::Path) -> (bool, Option<String>, Option<String>
         .arg("--abbrev-ref")
         .arg("HEAD")
         .output();
-        
+
     let branch = match branch_output {
         Ok(out) if out.status.success() => {
             let b = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if b.is_empty() { None } else { Some(b) }
-        },
+            if b.is_empty() {
+                None
+            } else {
+                Some(b)
+            }
+        }
         _ => None,
     };
 
@@ -108,7 +121,7 @@ fn get_git_info(path: &std::path::Path) -> (bool, Option<String>, Option<String>
         if out.status.success() {
             let output_str = String::from_utf8_lossy(&out.stdout);
             let lines: Vec<&str> = output_str.lines().collect();
-            
+
             if lines.len() > 1 {
                 status_str = "dirty".to_string();
             } else if let Some(first_line) = lines.first() {
@@ -164,9 +177,9 @@ fn get_projects(root_path: String) -> Result<Vec<Project>, String> {
                         if !name.starts_with('.') {
                             let project_path = entry.path();
                             let (project_type, sln_files) = determine_project_type(&project_path);
-                            
-                            projects.push(Project { 
-                                name, 
+
+                            projects.push(Project {
+                                name,
                                 project_type,
                                 path: project_path.to_string_lossy().to_string(),
                                 has_git: false,
@@ -174,7 +187,11 @@ fn get_projects(root_path: String) -> Result<Vec<Project>, String> {
                                 git_status: None,
                                 git_ahead: None,
                                 git_behind: None,
-                                sln_files: if sln_files.is_empty() { None } else { Some(sln_files) },
+                                sln_files: if sln_files.is_empty() {
+                                    None
+                                } else {
+                                    Some(sln_files)
+                                },
                             });
                         }
                     }
@@ -189,7 +206,8 @@ fn get_projects(root_path: String) -> Result<Vec<Project>, String> {
 
 #[tauri::command]
 async fn get_project_git_info(path: String) -> Result<ProjectGitInfo, String> {
-    let (has_git, git_branch, git_status, git_ahead, git_behind) = get_git_info(std::path::Path::new(&path));
+    let (has_git, git_branch, git_status, git_ahead, git_behind) =
+        get_git_info(std::path::Path::new(&path));
     Ok(ProjectGitInfo {
         has_git,
         git_branch,
@@ -205,7 +223,12 @@ fn quit_app() {
 }
 
 #[tauri::command]
-fn open_project(app: tauri::AppHandle, editor: String, folder_path: String, specific_file: Option<String>) -> Result<(), String> {
+fn open_project(
+    app: tauri::AppHandle,
+    editor: String,
+    folder_path: String,
+    specific_file: Option<String>,
+) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
@@ -231,15 +254,17 @@ fn open_project(app: tauri::AppHandle, editor: String, folder_path: String, spec
             for entry in src_entries.flatten() {
                 if let Ok(file_type) = entry.file_type() {
                     let file_name_str = entry.file_name().to_string_lossy().to_string();
-                    
+
                     // Check direct children of src for package.json or .sln/.slnx
                     if file_type.is_file() {
                         if file_name_str == "package.json" {
                             has_package_json = true;
-                        } else if file_name_str.ends_with(".sln") || file_name_str.ends_with(".slnx") {
+                        } else if file_name_str.ends_with(".sln")
+                            || file_name_str.ends_with(".slnx")
+                        {
                             sln_file = Some(entry.path());
                         }
-                    } 
+                    }
                     // Check one level deep inside src for subdirectories
                     else if file_type.is_dir() {
                         if let Ok(sub_entries) = std::fs::read_dir(entry.path()) {
@@ -248,7 +273,8 @@ fn open_project(app: tauri::AppHandle, editor: String, folder_path: String, spec
                                 if sub_name == "package.json" {
                                     has_package_json = true;
                                     open_target = entry.path().to_string_lossy().to_string();
-                                } else if sub_name.ends_with(".sln") || sub_name.ends_with(".slnx") {
+                                } else if sub_name.ends_with(".sln") || sub_name.ends_with(".slnx")
+                                {
                                     sln_file = Some(sub_entry.path());
                                 }
                             }
@@ -282,27 +308,8 @@ async fn git_fetch(path: String) -> Result<(), String> {
     std::process::Command::new("git")
         .current_dir(path)
         .arg("fetch")
-        .output()
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-async fn git_pull(path: String) -> Result<(), String> {
-    std::process::Command::new("git")
-        .current_dir(path)
-        .arg("pull")
-        .output()
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-async fn git_checkout(path: String, branch: String) -> Result<(), String> {
-    std::process::Command::new("git")
-        .current_dir(path)
-        .arg("checkout")
-        .arg(branch)
+        .arg("--prune")
+        .arg("--all")
         .output()
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -319,7 +326,8 @@ async fn get_git_branches(path: String) -> Result<Vec<String>, String> {
 
     if output.status.success() {
         let branches_str = String::from_utf8_lossy(&output.stdout);
-        let branches = branches_str.lines()
+        let branches = branches_str
+            .lines()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
@@ -332,10 +340,8 @@ async fn get_git_branches(path: String) -> Result<Vec<String>, String> {
 #[tauri::command]
 async fn open_in_tower(path: String) -> Result<(), String> {
     // Attempt to run `gittower` command, or fallback to native `open -a Tower`
-    let status = std::process::Command::new("gittower")
-        .arg(&path)
-        .status();
-        
+    let status = std::process::Command::new("gittower").arg(&path).status();
+
     if status.is_err() || !status.unwrap().success() {
         std::process::Command::new("open")
             .arg("-a")
@@ -344,7 +350,7 @@ async fn open_in_tower(path: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| e.to_string())?;
     }
-    
+
     Ok(())
 }
 
@@ -354,9 +360,21 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Focused(focused) = event {
+                if !focused {
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
-            get_projects, get_project_git_info, open_project, quit_app,
-            git_fetch, git_pull, git_checkout, get_git_branches, open_in_tower
+            get_projects,
+            get_project_git_info,
+            open_project,
+            quit_app,
+            git_fetch,
+            get_git_branches,
+            open_in_tower
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -378,7 +396,8 @@ pub fn run() {
                         button_state: MouseButtonState::Up,
                         rect,
                         ..
-                    } = event {
+                    } = event
+                    {
                         let app = tray.app_handle();
                         if let Some(window) = app.get_webview_window("main") {
                             let is_visible = window.is_visible().unwrap_or(false);
@@ -391,12 +410,19 @@ pub fn run() {
                                         tauri::Position::Logical(p) => (p.x as f64, p.y as f64),
                                     };
                                     let (tray_w, tray_h) = match rect.size {
-                                        tauri::Size::Physical(s) => (s.width as f64, s.height as f64),
-                                        tauri::Size::Logical(s) => (s.width as f64, s.height as f64),
+                                        tauri::Size::Physical(s) => {
+                                            (s.width as f64, s.height as f64)
+                                        }
+                                        tauri::Size::Logical(s) => {
+                                            (s.width as f64, s.height as f64)
+                                        }
                                     };
-                                    let x = tray_x + (tray_w / 2.0) - (window_size.width as f64 / 2.0);
+                                    let x =
+                                        tray_x + (tray_w / 2.0) - (window_size.width as f64 / 2.0);
                                     let y = tray_y + tray_h + 5.0;
-                                    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x as i32, y as i32)));
+                                    let _ = window.set_position(tauri::Position::Physical(
+                                        tauri::PhysicalPosition::new(x as i32, y as i32),
+                                    ));
                                 }
 
                                 let _ = window.show();
@@ -406,7 +432,7 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
-
+            
             Ok(())
         })
         .run(tauri::generate_context!())

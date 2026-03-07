@@ -1,6 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Settings, RefreshCw, Folder, Box, Layers, Menu, LogOut, GitBranch, ArrowDownLeft, TerminalSquare, Download } from 'lucide-react';
+
+
+import { Settings, RefreshCw, Folder, Box, Layers, Menu, LogOut, GitBranch, ArrowDownLeft, Download } from 'lucide-react';
+import GithubIcon from "@/components/svg/GithubIcon.tsx"
 import { useSettingsStore } from './store';
 import { SettingsDialog } from './SettingsDialog.tsx';
 import { Separator } from "@/components/ui/separator"
@@ -48,6 +51,7 @@ function App() {
   const [activeGitActions, setActiveGitActions] = useState<Record<string, 'fetch' | 'pull' | 'tower'>>({});
   
   const abortControllerRef = useRef<AbortController | null>(null);
+  const commandListRef = useRef<HTMLDivElement>(null);
 
   const fetchProjects = useCallback(async () => {
     if (!projectsDir) return;
@@ -100,7 +104,10 @@ function App() {
   useEffect(() => {
     const handleFocus = () => fetchProjects();
     window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [fetchProjects]);
 
   const openProject = async (folderName: string, specificFile: string | null = null) => {
@@ -155,7 +162,7 @@ function App() {
     }
   };
 
-  const handleGlobalGitAction = async (action: 'refresh' | 'fetch' | 'checkout') => {
+  const handleGlobalGitAction = async (action: 'refresh' | 'fetch') => {
     const gitProjects = projects.filter(p => p.has_git);
     if (!gitProjects.length) return;
 
@@ -164,18 +171,11 @@ function App() {
       return;
     }
 
-    let branch = '';
-    if (action === 'checkout') {
-      const promptResult = window.prompt("Enter branch name to checkout for all Git projects (e.g., main, development):");
-      if (!promptResult) return;
-      branch = promptResult;
-    }
-
     setProgressState({
       isOpen: true,
       current: 0,
       total: gitProjects.length,
-      title: action === 'fetch' ? 'Fetching Repositories' : `Checking out '${branch}'`,
+      title: 'Fetching Repositories',
       description: 'Please wait while the process completes in the background.'
     });
 
@@ -193,8 +193,6 @@ function App() {
       try {
         if (action === 'fetch') {
           await invoke('git_fetch', { path: p.path });
-        } else if (action === 'checkout') {
-          await invoke('git_checkout', { path: p.path, branch });
         }
       } catch (error) {
         console.error(`Error on project ${p.name}:`, error);
@@ -245,9 +243,18 @@ function App() {
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
       <Command className="rounded-none border-b-0 h-full flex flex-col pt-2">
         <div className="px-3 pb-2 pt-1">
-          <CommandInput placeholder="Search projects..." autoFocus className="h-9" />
+          <CommandInput 
+            placeholder="Search projects..." 
+            autoFocus 
+            className="h-9" 
+            onValueChange={() => {
+              if (commandListRef.current) {
+                commandListRef.current.scrollTop = 0;
+              }
+            }}
+          />
         </div>
-        <CommandList className="flex-1 max-h-none overflow-y-auto overflow-x-hidden px-2 pb-2">
+        <CommandList ref={commandListRef} className="flex-1 max-h-none overflow-y-auto overflow-x-hidden px-2 pb-2">
           <CommandEmpty className="py-6 text-center text-sm">No projects found.</CommandEmpty>
           <CommandGroup heading="Projects">
             {projects.map((proj) => (
@@ -320,21 +327,6 @@ function App() {
 
                         <Tooltip>
                           <TooltipTrigger 
-                            className={`p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex outline-none ${activeGitActions[proj.path] === 'pull' ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            onClick={(e) => executeGitAction(e, 'pull', proj.path)}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            disabled={!!activeGitActions[proj.path]}
-                          >
-                            {activeGitActions[proj.path] === 'pull'
-                              ? <RefreshCw strokeWidth={1.5} className="w-3.5 h-3.5 animate-spin" />
-                              : <Download strokeWidth={1.5} className="w-3.5 h-3.5" />
-                            }
-                          </TooltipTrigger>
-                          <TooltipContent><p className="text-xs">{activeGitActions[proj.path] === 'pull' ? 'Pulling...' : 'Pull'}</p></TooltipContent>
-                        </Tooltip>
-
-                        <Tooltip>
-                          <TooltipTrigger 
                             className={`p-1 hover:bg-muted rounded text-muted-foreground hover:text-blue-400 inline-flex outline-none ${activeGitActions[proj.path] === 'tower' ? 'opacity-50 cursor-not-allowed' : ''}`}
                             onClick={(e) => executeGitAction(e, 'tower', proj.path)}
                             onPointerDown={(e) => e.stopPropagation()}
@@ -342,7 +334,7 @@ function App() {
                           >
                             {activeGitActions[proj.path] === 'tower'
                               ? <RefreshCw strokeWidth={1.5} className="w-3.5 h-3.5 animate-spin" />
-                              : <TerminalSquare strokeWidth={1.5} className="w-3.5 h-3.5" />
+                              : <GithubIcon className="w-3.5 h-3.5" />
                             }
                           </TooltipTrigger>
                           <TooltipContent><p className="text-xs">{activeGitActions[proj.path] === 'tower' ? 'Opening...' : 'Open in Tower'}</p></TooltipContent>
@@ -419,10 +411,7 @@ function App() {
               <Download className="mr-2 w-4 h-4 text-muted-foreground" />
               <span>Fetch All repos</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleGlobalGitAction('checkout')}>
-              <GitBranch className="mr-2 w-4 h-4 text-muted-foreground" />
-              <span>Checkout All branch...</span>
-            </DropdownMenuItem>
+
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
               <Settings className="mr-2 w-4 h-4 text-muted-foreground" />

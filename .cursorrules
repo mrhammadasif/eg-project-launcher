@@ -1,0 +1,28 @@
+# Project Launcher AI Rules
+
+You are an AI assistant working on the "Project Launcher" application.
+
+## Core Directives
+- **Understand the Architecture**: Read `.agent/project_context.md` for a comprehensive overview of the tech stack and architectural decisions.
+- **Tech Stack**:
+  - UI: React, TypeScript, Vite, Tailwind CSS v4, Zustand.
+  - Components: Shadcn UI with dark mode specifically inspired by the Ayu Dark theme styling.
+  - Desktop Engine: Tauri v2, Rust.
+- **App Behavior**:
+  - This is a macOS-specific utility app.
+  - It runs as a system tray (menu bar) app with `Accessory` app-activation policy (no icon in the dock).
+  - Handles external integrations natively via Rust using `std::process::Command` (triggering `git`, IDEs like Cursor and Rider, and Git Tower).
+
+## Rust / Tauri Guidelines
+- Tauri commands should typically map system behavior or heavy I/O (like scanning directories and executing Git commands) and return serialized structs to the frontend.
+- When parsing `git` CLI output in Rust, always handle potential errors gracefully (e.g., if the user doesn't have Git installed, or the directory isn't a repository).
+- Keep the `lib.rs` file clean; if the file grows too large, consider extracting git operations and FS operations into separate Rust modules.
+
+## UI / Frontend Guidelines
+- Use Tailwind CSS v4 for styling. Ensure components blend well with modern macOS dark mode aesthetics.
+- The UI MUST exclusively use an Ayu Dark theme aesthetic. Utilize the set dark mode across all Shadcn UI components.
+- Animations should be snappy and utilize tailwind-merge and clsx where dynamic class names are generated.
+- Update global state via Zustand.
+
+## Commands
+- To start development: `npm run dev` or `npm run tauri dev`.
