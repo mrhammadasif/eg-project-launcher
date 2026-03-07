@@ -32,7 +32,10 @@ fn get_projects(root_path: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-fn open_project(editor: String, folder_path: String) -> Result<(), String> {
+fn open_project(app: tauri::AppHandle, editor: String, folder_path: String) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
     let path = if folder_path.starts_with("~/") {
         let home = std::env::var("HOME").unwrap_or_else(|_| "".to_string());
         folder_path.replacen("~", &home, 1)
@@ -86,18 +89,14 @@ fn open_project(editor: String, folder_path: String) -> Result<(), String> {
         }
     }
 
-    let status = std::process::Command::new("open")
+    let _ = std::process::Command::new("open")
         .arg("-a")
         .arg(&final_editor)
         .arg(&open_target)
-        .status()
+        .spawn()
         .map_err(|e| e.to_string())?;
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("Failed to open {} on {}", final_editor, open_target))
-    }
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
