@@ -269,7 +269,7 @@ fn open_project(app: tauri::AppHandle, editor: String, folder_path: String) -> R
 }
 
 #[tauri::command]
-fn git_fetch(path: String) -> Result<(), String> {
+async fn git_fetch(path: String) -> Result<(), String> {
     std::process::Command::new("git")
         .current_dir(path)
         .arg("fetch")
@@ -279,7 +279,7 @@ fn git_fetch(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn git_pull(path: String) -> Result<(), String> {
+async fn git_pull(path: String) -> Result<(), String> {
     std::process::Command::new("git")
         .current_dir(path)
         .arg("pull")
@@ -289,7 +289,7 @@ fn git_pull(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn git_checkout(path: String, branch: String) -> Result<(), String> {
+async fn git_checkout(path: String, branch: String) -> Result<(), String> {
     std::process::Command::new("git")
         .current_dir(path)
         .arg("checkout")
@@ -300,7 +300,7 @@ fn git_checkout(path: String, branch: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_git_branches(path: String) -> Result<Vec<String>, String> {
+async fn get_git_branches(path: String) -> Result<Vec<String>, String> {
     let output = std::process::Command::new("git")
         .current_dir(path)
         .arg("branch")
@@ -321,7 +321,7 @@ fn get_git_branches(path: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-fn open_in_tower(path: String) -> Result<(), String> {
+async fn open_in_tower(path: String) -> Result<(), String> {
     // Attempt to run `gittower` command, or fallback to native `open -a Tower`
     let status = std::process::Command::new("gittower")
         .arg(&path)
