@@ -2,8 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Settings, RefreshCw, Folder } from 'lucide-react';
 import { useSettingsStore } from './store';
-import { SettingsDialog } from './SettingsDialog';
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { SettingsDialog } from './SettingsDialog.tsx';
 import { Separator } from "@/components/ui/separator"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 
@@ -53,18 +52,16 @@ function App() {
         <div className="px-3 pb-2 pt-1">
           <CommandInput placeholder="Search projects..." autoFocus className="h-9" />
         </div>
-        <CommandList className="flex-1 overflow-hidden px-2">
-          <ScrollArea className="h-full">
-            <CommandEmpty className="py-6 text-center text-sm">No projects found.</CommandEmpty>
-            <CommandGroup heading="Projects">
-              {projects.map((proj) => (
-                <CommandItem key={proj} onSelect={() => openProject(proj)} className="cursor-pointer py-2">
-                  <Folder className="mr-2 h-4 w-4 text-muted-foreground" />
-                  <span>{proj}</span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </ScrollArea>
+        <CommandList className="flex-1 max-h-none overflow-y-auto overflow-x-hidden px-2 pb-2">
+          <CommandEmpty className="py-6 text-center text-sm">No projects found.</CommandEmpty>
+          <CommandGroup heading="Projects">
+            {projects.map((proj) => (
+              <CommandItem key={proj} onSelect={() => openProject(proj)} className="cursor-pointer py-2">
+                <Folder className="mr-2 h-4 w-4 text-muted-foreground" />
+                <span>{proj}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
         </CommandList>
       </Command>
 
