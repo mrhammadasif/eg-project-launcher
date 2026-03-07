@@ -16,6 +16,8 @@ type Project = {
   has_git: boolean;
   git_branch: string | null;
   git_status: string | null;
+  git_ahead: number | null;
+  git_behind: number | null;
 };
 
 function App() {
@@ -135,8 +137,8 @@ function App() {
           <CommandEmpty className="py-6 text-center text-sm">No projects found.</CommandEmpty>
           <CommandGroup heading="Projects">
             {projects.map((proj) => (
-              <CommandItem key={proj.name} onSelect={() => openProject(proj.name)} className="cursor-pointer py-2 group">
-                <div className="flex items-center flex-1 overflow-hidden">
+              <CommandItem key={proj.name} onSelect={() => openProject(proj.name)} className="cursor-pointer py-2 group flex items-center justify-between">
+                <div className="flex items-center min-w-0 pr-2">
                   {proj.project_type === 'node' ? (
                     <Box className="mr-2 h-4 w-4 shrink-0 text-primary" />
                   ) : proj.project_type === 'dotnet' ? (
@@ -144,45 +146,54 @@ function App() {
                   ) : (
                     <Folder className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
                   )}
-                  <span className="truncate">{proj.name}</span>
-                  
+                  <span className="truncate flex-1">{proj.name}</span>
+                </div>
+
+                <div className="flex items-center shrink-0">
                   {proj.has_git && proj.git_branch && (
                     <div 
                       onClick={(e) => switchBranch(e, proj.path)}
-                      className="ml-3 flex items-center text-xs space-x-1 shrink-0 bg-muted/50 hover:bg-muted px-1.5 py-0.5 rounded cursor-pointer transition-colors"
+                      className="flex items-center text-xs space-x-1.5 bg-muted/50 hover:bg-muted px-2 py-0.5 rounded cursor-pointer transition-colors"
                       title="Click to change branch"
                     >
-                      <GitBranch className={`w-3 h-3 ${getStatusColor(proj.git_status)}`} />
-                      <span className="text-muted-foreground max-w-[100px] truncate">{proj.git_branch}</span>
+                      <span className={`max-w-[120px] truncate ${getStatusColor(proj.git_status)}`}>
+                        {proj.git_branch}
+                      </span>
+                      {(proj.git_ahead || proj.git_behind) && (
+                        <span className="flex items-center space-x-1 text-[10px] font-medium opacity-80">
+                          {proj.git_behind ? <span className="text-amber-400">↓{proj.git_behind}</span> : null}
+                          {proj.git_ahead ? <span className="text-blue-400">↑{proj.git_ahead}</span> : null}
+                        </span>
+                      )}
                     </div>
                   )}
-                </div>
 
-                <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">
-                  {proj.has_git && (
-                    <>
-                      <Tooltip>
-                        <TooltipTrigger className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex">
-                          <Download className="w-3.5 h-3.5" onClick={(e) => executeGitAction(e, 'fetch', proj.path)} />
-                        </TooltipTrigger>
-                        <TooltipContent><p className="text-xs">Fetch</p></TooltipContent>
-                      </Tooltip>
+                  <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">
+                    {proj.has_git && (
+                      <>
+                        <Tooltip>
+                          <TooltipTrigger className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex">
+                            <Download className="w-3.5 h-3.5" onClick={(e) => executeGitAction(e, 'fetch', proj.path)} />
+                          </TooltipTrigger>
+                          <TooltipContent><p className="text-xs">Fetch</p></TooltipContent>
+                        </Tooltip>
 
-                      <Tooltip>
-                        <TooltipTrigger className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex">
-                          <ArrowDownToLine className="w-3.5 h-3.5" onClick={(e) => executeGitAction(e, 'pull', proj.path)} />
-                        </TooltipTrigger>
-                        <TooltipContent><p className="text-xs">Pull</p></TooltipContent>
-                      </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex">
+                            <ArrowDownToLine className="w-3.5 h-3.5" onClick={(e) => executeGitAction(e, 'pull', proj.path)} />
+                          </TooltipTrigger>
+                          <TooltipContent><p className="text-xs">Pull</p></TooltipContent>
+                        </Tooltip>
 
-                      <Tooltip>
-                        <TooltipTrigger className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-blue-400 inline-flex">
-                          <TerminalSquare className="w-3.5 h-3.5" onClick={(e) => executeGitAction(e, 'tower', proj.path)} />
-                        </TooltipTrigger>
-                        <TooltipContent><p className="text-xs">Open in Tower</p></TooltipContent>
-                      </Tooltip>
-                    </>
-                  )}
+                        <Tooltip>
+                          <TooltipTrigger className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-blue-400 inline-flex">
+                            <TerminalSquare className="w-3.5 h-3.5" onClick={(e) => executeGitAction(e, 'tower', proj.path)} />
+                          </TooltipTrigger>
+                          <TooltipContent><p className="text-xs">Open in Tower</p></TooltipContent>
+                        </Tooltip>
+                      </>
+                    )}
+                  </div>
                 </div>
               </CommandItem>
             ))}

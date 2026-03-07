@@ -13,7 +13,7 @@
     "windows": [
       {
         "title": "Project Launcher",
-        "width": 400,
+        "width": 500,
         "height": 550,
         "resizable": false,
         "fullscreen": false,

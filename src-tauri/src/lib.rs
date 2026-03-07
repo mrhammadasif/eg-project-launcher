@@ -11,6 +11,8 @@ struct Project {
     has_git: bool,
     git_branch: Option<String>,
     git_status: Option<String>, // "clean", "dirty", "ahead", "behind"
+    git_ahead: Option<u32>,
+    git_behind: Option<u32>,
 }
 
 fn determine_project_type(path: &std::path::Path) -> String {
@@ -56,10 +58,10 @@ fn determine_project_type(path: &std::path::Path) -> String {
     }
 }
 
-fn get_git_info(path: &std::path::Path) -> (bool, Option<String>, Option<String>) {
+fn get_git_info(path: &std::path::Path) -> (bool, Option<String>, Option<String>, Option<u32>, Option<u32>) {
     let git_dir = path.join(".git");
     if !git_dir.exists() {
-        return (false, None, None);
+        return (false, None, None, None, None);
     }
 
     // Get Branch
@@ -87,6 +89,9 @@ fn get_git_info(path: &std::path::Path) -> (bool, Option<String>, Option<String>
         .output();
 
     let mut status_str = "clean".to_string();
+    let mut ahead_count = None;
+    let mut behind_count = None;
+
     if let Ok(out) = status_output {
         if out.status.success() {
             let output_str = String::from_utf8_lossy(&out.stdout);
@@ -95,16 +100,36 @@ fn get_git_info(path: &std::path::Path) -> (bool, Option<String>, Option<String>
             if lines.len() > 1 {
                 status_str = "dirty".to_string();
             } else if let Some(first_line) = lines.first() {
-                if first_line.contains("[ahead ") {
-                    status_str = "ahead".to_string();
-                } else if first_line.contains("[behind ") {
-                    status_str = "behind".to_string();
+                if first_line.contains("[ahead ") || first_line.contains("[behind ") {
+                    status_str = "ahead".to_string(); // Fallback label, but ahead_count and behind_count overrides
+                }
+            }
+
+            if let Some(first_line) = lines.first() {
+                if first_line.starts_with("##") {
+                    if let Some(open_bracket) = first_line.find('[') {
+                        if let Some(close_bracket) = first_line.rfind(']') {
+                            let inner = &first_line[open_bracket + 1..close_bracket];
+                            for part in inner.split(',') {
+                                let p = part.trim();
+                                if p.starts_with("ahead ") {
+                                    if let Ok(n) = p[6..].parse() {
+                                        ahead_count = Some(n);
+                                    }
+                                } else if p.starts_with("behind ") {
+                                    if let Ok(n) = p[7..].parse() {
+                                        behind_count = Some(n);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
-    (true, branch, Some(status_str))
+    (true, branch, Some(status_str), ahead_count, behind_count)
 }
 
 #[tauri::command]
@@ -127,7 +152,7 @@ fn get_projects(root_path: String) -> Result<Vec<Project>, String> {
                         if !name.starts_with('.') {
                             let project_path = entry.path();
                             let project_type = determine_project_type(&project_path);
-                            let (has_git, git_branch, git_status) = get_git_info(&project_path);
+                            let (has_git, git_branch, git_status, git_ahead, git_behind) = get_git_info(&project_path);
                             
                             projects.push(Project { 
                                 name, 
@@ -135,7 +160,9 @@ fn get_projects(root_path: String) -> Result<Vec<Project>, String> {
                                 path: project_path.to_string_lossy().to_string(),
                                 has_git,
                                 git_branch,
-                                git_status
+                                git_status,
+                                git_ahead,
+                                git_behind,
                             });
                         }
                     }
