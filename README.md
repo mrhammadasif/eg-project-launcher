@@ -1,73 +1,37 @@
-# React + TypeScript + Vite
+# Project Launcher
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Project Launcher is a macOS desktop application designed to quickly list, inspect, and launch local development projects straight from your system tray. 
 
-Currently, two official plugins are available:
+Built with **Tauri v2** and **Rust** on the backend, and **React + TypeScript + Vite** on the frontend. The UI uses Shadcn UI components with an Ayu Dark theme aesthetic.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Features
 
-## React Compiler
+- **Quick Access**: Runs in the macOS menu bar as a headless Accessory application. Toggle it instantly to view your projects.
+- **Auto-Discovery**: Scans designated root folders to automatically detect:
+  - **Node.js Projects** (identified by `package.json`)
+  - **.NET Projects** (identified by `.sln` or `.slnx` files)
+- **IDE Integration**: Instantly open projects in your preferred IDE:
+  - **Cursor** for Node/JS/TS projects.
+  - **JetBrains Rider** for .NET solution files.
+- **Native Git Integration**: Deep integration with your existing `git` installation:
+  - View real-time status (clean, dirty, ahead/behind counts).
+  - Perform `git fetch`.
+  - Check out branches natively.
+  - Open repositories directly in **Tower** (`gittower`).
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Stack
 
-## Expanding the ESLint configuration
+- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS v4, `shadcn/ui`, `base-ui`, Zustand.
+- **Backend**: Rust, Tauri v2.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Development
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+```bash
+# Install dependencies
+npm install
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# Run the Tauri development server (starts both Vite and Rust backends)
+npm run tauri dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+During development, any changes in `/src` will trigger a Vite HMR update. Any changes in `/src-tauri/src/lib.rs` will automatically recompile the Rust binary.
