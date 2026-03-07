@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 type Project = {
   name: string;
@@ -33,6 +34,14 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  
+  const [progressState, setProgressState] = useState<{ isOpen: boolean, current: number, total: number, title: string, description: string }>({
+    isOpen: false,
+    current: 0,
+    total: 0,
+    title: '',
+    description: '',
+  });
 
   const fetchProjects = useCallback(async () => {
     if (!projectsDir) return;
@@ -111,23 +120,50 @@ function App() {
     const gitProjects = projects.filter(p => p.has_git);
     if (!gitProjects.length) return;
 
-    setLoading(true);
-    try {
-      if (action === 'refresh') {
-        await fetchProjects();
-      } else if (action === 'fetch') {
-        await Promise.all(gitProjects.map(p => invoke('git_fetch', { path: p.path }).catch(console.error)));
-        await fetchProjects();
-      } else if (action === 'checkout') {
-        const branch = window.prompt("Enter branch name to checkout for all Git projects (e.g., main, development):");
-        if (branch) {
-          await Promise.all(gitProjects.map(p => invoke('git_checkout', { path: p.path, branch }).catch(console.error)));
-          await fetchProjects();
-        }
-      }
-    } finally {
-      setLoading(false);
+    if (action === 'refresh') {
+      await fetchProjects();
+      return;
     }
+
+    let branch = '';
+    if (action === 'checkout') {
+      const promptResult = window.prompt("Enter branch name to checkout for all Git projects (e.g., main, development):");
+      if (!promptResult) return;
+      branch = promptResult;
+    }
+
+    setProgressState({
+      isOpen: true,
+      current: 0,
+      total: gitProjects.length,
+      title: action === 'fetch' ? 'Fetching Repositories' : `Checking out '${branch}'`,
+      description: 'Please wait while the process completes in the background.'
+    });
+
+    let completed = 0;
+    
+    // We execute them sequentially so we don't overwhelm the system and max out file handles/processes
+    // while updating the progress bar natively.
+    for (const p of gitProjects) {
+      try {
+        if (action === 'fetch') {
+          await invoke('git_fetch', { path: p.path });
+        } else if (action === 'checkout') {
+          await invoke('git_checkout', { path: p.path, branch });
+        }
+      } catch (error) {
+        console.error(`Error on project ${p.name}:`, error);
+      }
+      completed++;
+      setProgressState(prev => ({ ...prev, current: completed }));
+    }
+
+    // Give the UI a brief moment to show 100% completion before hiding
+    setTimeout(async () => {
+      setProgressState(prev => ({ ...prev, isOpen: false }));
+      // We trigger a background refresh of the projects to update the icons and commit statuses
+      await fetchProjects();
+    }, 500);
   };
 
   const [openBranchDropdown, setOpenBranchDropdown] = useState<string | null>(null);
@@ -287,6 +323,32 @@ function App() {
           <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
         </button>
       </div>
+
+      <Dialog open={progressState.isOpen} onOpenChange={(open) => {
+        if (!open && progressState.current >= progressState.total) {
+          setProgressState(prev => ({ ...prev, isOpen: false }));
+        }
+      }}>
+        <DialogContent className="sm:max-w-md [&>button]:hidden">
+          <DialogHeader>
+            <DialogTitle>{progressState.title}</DialogTitle>
+            <DialogDescription>
+              {progressState.description}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center justify-center py-6 space-y-4">
+            <div className="w-full bg-secondary rounded-full h-2.5 overflow-hidden">
+              <div 
+                className="bg-primary h-2.5 rounded-full transition-all duration-300 ease-out" 
+                style={{ width: `${progressState.total > 0 ? (progressState.current / progressState.total) * 100 : 0}%` }}
+              ></div>
+            </div>
+            <div className="text-sm font-medium text-muted-foreground">
+              Processed {progressState.current} out of {progressState.total}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
