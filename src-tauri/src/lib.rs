@@ -15,6 +15,15 @@ struct Project {
     git_behind: Option<u32>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct ProjectGitInfo {
+    has_git: bool,
+    git_branch: Option<String>,
+    git_status: Option<String>,
+    git_ahead: Option<u32>,
+    git_behind: Option<u32>,
+}
+
 fn determine_project_type(path: &std::path::Path) -> String {
     let mut has_package_json = false;
     let mut has_sln = false;
@@ -152,17 +161,16 @@ fn get_projects(root_path: String) -> Result<Vec<Project>, String> {
                         if !name.starts_with('.') {
                             let project_path = entry.path();
                             let project_type = determine_project_type(&project_path);
-                            let (has_git, git_branch, git_status, git_ahead, git_behind) = get_git_info(&project_path);
                             
                             projects.push(Project { 
                                 name, 
                                 project_type,
                                 path: project_path.to_string_lossy().to_string(),
-                                has_git,
-                                git_branch,
-                                git_status,
-                                git_ahead,
-                                git_behind,
+                                has_git: false,
+                                git_branch: None,
+                                git_status: None,
+                                git_ahead: None,
+                                git_behind: None,
                             });
                         }
                     }
@@ -173,6 +181,18 @@ fn get_projects(root_path: String) -> Result<Vec<Project>, String> {
 
     projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     Ok(projects)
+}
+
+#[tauri::command]
+async fn get_project_git_info(path: String) -> Result<ProjectGitInfo, String> {
+    let (has_git, git_branch, git_status, git_ahead, git_behind) = get_git_info(std::path::Path::new(&path));
+    Ok(ProjectGitInfo {
+        has_git,
+        git_branch,
+        git_status,
+        git_ahead,
+        git_behind,
+    })
 }
 
 #[tauri::command]
@@ -326,7 +346,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            get_projects, open_project, quit_app,
+            get_projects, get_project_git_info, open_project, quit_app,
             git_fetch, git_pull, git_checkout, get_git_branches, open_in_tower
         ])
         .setup(|app| {

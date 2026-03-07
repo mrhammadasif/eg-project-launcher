@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import type { MouseEvent } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Settings, RefreshCw, Folder, Box, Layers, Menu, LogOut, GitBranch, ArrowDownToLine, Download, TerminalSquare } from 'lucide-react';
+import { Settings, RefreshCw, Folder, Box, Layers, Menu, LogOut, GitBranch, ArrowDownLeft, TerminalSquare, Download } from 'lucide-react';
 import { useSettingsStore } from './store';
 import { SettingsDialog } from './SettingsDialog.tsx';
 import { Separator } from "@/components/ui/separator"
@@ -20,6 +20,14 @@ type Project = {
   git_behind: number | null;
 };
 
+type ProjectGitInfo = {
+  has_git: boolean;
+  git_branch: string | null;
+  git_status: string | null;
+  git_ahead: number | null;
+  git_behind: number | null;
+}
+
 function App() {
   const { projectsDir, preferredEditor, customEditorPath } = useSettingsStore();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -30,8 +38,21 @@ function App() {
     if (!projectsDir) return;
     setLoading(true);
     try {
-      const result = await invoke<Project[]>('get_projects', { rootPath: projectsDir });
-      setProjects(result);
+      const baseProjects = await invoke<Project[]>('get_projects', { rootPath: projectsDir });
+      setProjects(baseProjects);
+
+      // Fetch git info asynchronously for each project in the background
+      baseProjects.forEach(async (proj) => {
+        try {
+          const gitInfo = await invoke<ProjectGitInfo>('get_project_git_info', { path: proj.path });
+          if (gitInfo.has_git) {
+            setProjects(prev => prev.map(p => p.name === proj.name ? { ...p, ...gitInfo } : p));
+          }
+        } catch (err) {
+          console.error(`Failed to get git info for ${proj.name}`, err);
+        }
+      });
+      
     } catch (e) {
       console.error(e);
       setProjects([]);
@@ -109,20 +130,20 @@ function App() {
     }
   };
 
-  const switchBranch = async (e: MouseEvent, path: string) => {
-    e.stopPropagation();
-    const branchName = window.prompt("Enter new branch name to checkout:");
-    if (branchName) {
-      setLoading(true);
-      try {
-        await invoke('git_checkout', { path, branch: branchName });
-        await fetchProjects();
-      } catch (err) {
-        console.error(err);
-        window.alert("Failed to switch branch: " + err);
-      } finally {
-        setLoading(false);
-      }
+  const [openBranchDropdown, setOpenBranchDropdown] = useState<string | null>(null);
+  const [projectBranches, setProjectBranches] = useState<Record<string, string[]>>({});
+
+  const executeBranchSwitch = async (path: string, branchName: string) => {
+    setLoading(true);
+    setOpenBranchDropdown(null);
+    try {
+      await invoke('git_checkout', { path, branch: branchName });
+      await fetchProjects();
+    } catch (err) {
+      console.error(err);
+      window.alert("Failed to switch branch: " + err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -150,50 +171,76 @@ function App() {
                 </div>
 
                 <div className="flex items-center shrink-0">
-                  {proj.has_git && proj.git_branch && (
-                    <div 
-                      onClick={(e) => switchBranch(e, proj.path)}
-                      className="flex items-center text-xs space-x-1.5 bg-muted/50 hover:bg-muted px-2 py-0.5 rounded cursor-pointer transition-colors"
-                      title="Click to change branch"
-                    >
-                      <span className={`max-w-[120px] truncate ${getStatusColor(proj.git_status)}`}>
-                        {proj.git_branch}
-                      </span>
-                      {(proj.git_ahead || proj.git_behind) && (
-                        <span className="flex items-center space-x-1 text-[10px] font-medium opacity-80">
-                          {proj.git_behind ? <span className="text-amber-400">↓{proj.git_behind}</span> : null}
-                          {proj.git_ahead ? <span className="text-blue-400">↑{proj.git_ahead}</span> : null}
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">
+                  <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity mr-2 shrink-0">
                     {proj.has_git && (
                       <>
                         <Tooltip>
                           <TooltipTrigger className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex">
-                            <Download className="w-3.5 h-3.5" onClick={(e) => executeGitAction(e, 'fetch', proj.path)} />
+                            <ArrowDownLeft strokeDasharray="2 2" strokeWidth={1.5} className="w-3.5 h-3.5 text-muted-foreground" onClick={(e) => executeGitAction(e, 'fetch', proj.path)} />
                           </TooltipTrigger>
                           <TooltipContent><p className="text-xs">Fetch</p></TooltipContent>
                         </Tooltip>
 
                         <Tooltip>
                           <TooltipTrigger className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex">
-                            <ArrowDownToLine className="w-3.5 h-3.5" onClick={(e) => executeGitAction(e, 'pull', proj.path)} />
+                            <ArrowDownLeft strokeWidth={1.5} className="w-3.5 h-3.5 text-muted-foreground" onClick={(e) => executeGitAction(e, 'pull', proj.path)} />
                           </TooltipTrigger>
                           <TooltipContent><p className="text-xs">Pull</p></TooltipContent>
                         </Tooltip>
 
                         <Tooltip>
                           <TooltipTrigger className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-blue-400 inline-flex">
-                            <TerminalSquare className="w-3.5 h-3.5" onClick={(e) => executeGitAction(e, 'tower', proj.path)} />
+                            <TerminalSquare strokeWidth={1.5} className="w-3.5 h-3.5" onClick={(e) => executeGitAction(e, 'tower', proj.path)} />
                           </TooltipTrigger>
                           <TooltipContent><p className="text-xs">Open in Tower</p></TooltipContent>
                         </Tooltip>
                       </>
                     )}
                   </div>
+
+                  {proj.has_git && proj.git_branch && (
+                    <DropdownMenu 
+                      open={openBranchDropdown === proj.path} 
+                      onOpenChange={(open) => {
+                        if (open) {
+                          if (!projectBranches[proj.path]) {
+                            invoke<string[]>('get_git_branches', { path: proj.path })
+                              .then(branches => setProjectBranches(prev => ({ ...prev, [proj.path]: branches })))
+                              .catch(console.error);
+                          }
+                          setOpenBranchDropdown(proj.path);
+                        } else {
+                          setOpenBranchDropdown(null);
+                        }
+                      }}
+                    >
+                      <DropdownMenuTrigger 
+                        className={`flex items-center text-xs space-x-1.5 px-2 py-0.5 rounded cursor-pointer transition-colors outline-none ${openBranchDropdown === proj.path ? 'bg-muted' : 'bg-muted/50 hover:bg-muted'}`}
+                        title="Click to check out branch"
+                      >
+                        <span className={`max-w-[140px] truncate ${getStatusColor(proj.git_status)}`}>
+                          {proj.git_branch}
+                        </span>
+                        {(proj.git_ahead || proj.git_behind) && (
+                          <span className="flex items-center space-x-1 text-[10px] font-medium opacity-80 pl-1 border-l border-border/50">
+                            {proj.git_behind !== null && proj.git_behind > 0 ? <span className="text-amber-400">↓{proj.git_behind}</span> : null}
+                            {proj.git_ahead !== null && proj.git_ahead > 0 ? <span className="text-blue-400">↑{proj.git_ahead}</span> : null}
+                          </span>
+                        )}
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent onClick={(e) => e.stopPropagation()} align="end" className="w-56 max-h-64 overflow-y-auto">
+                        <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-b mb-1">
+                          Switch Branch
+                        </div>
+                        {projectBranches[proj.path]?.map(b => (
+                          <DropdownMenuItem key={b} onClick={() => executeBranchSwitch(proj.path, b)} className={b === proj.git_branch ? "bg-accent text-accent-foreground font-medium" : ""}>
+                            <GitBranch className="mr-2 w-3.5 h-3.5 opacity-70" />
+                            <span className="truncate">{b}</span>
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
                 </div>
               </CommandItem>
             ))}
