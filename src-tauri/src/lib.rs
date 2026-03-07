@@ -1,8 +1,59 @@
 use tauri::Manager;
 use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState, TrayIconEvent};
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
+struct Project {
+    name: String,
+    project_type: String,
+}
+
+fn determine_project_type(path: &std::path::Path) -> String {
+    let mut has_package_json = false;
+    let mut has_sln = false;
+
+    let dirs_to_check = vec![path.to_path_buf(), path.join("src")];
+    
+    for dir in dirs_to_check {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                if let Ok(file_type) = entry.file_type() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if file_type.is_file() {
+                        if name == "package.json" {
+                            has_package_json = true;
+                        } else if name.ends_with(".sln") || name.ends_with(".slnx") {
+                            has_sln = true;
+                        }
+                    } else if file_type.is_dir() && dir == path.join("src") {
+                        if let Ok(sub_entries) = std::fs::read_dir(entry.path()) {
+                            for sub_entry in sub_entries.flatten() {
+                                let sub_name = sub_entry.file_name().to_string_lossy().to_string();
+                                if sub_name == "package.json" {
+                                    has_package_json = true;
+                                } else if sub_name.ends_with(".sln") || sub_name.ends_with(".slnx") {
+                                    has_sln = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if has_sln {
+        "dotnet".to_string()
+    } else if has_package_json {
+        "node".to_string()
+    } else {
+        "unknown".to_string()
+    }
+}
+
 #[tauri::command]
-fn get_projects(root_path: String) -> Result<Vec<String>, String> {
+fn get_projects(root_path: String) -> Result<Vec<Project>, String> {
     let mut projects = Vec::new();
     let path = if root_path.starts_with("~/") {
         let home = std::env::var("HOME").unwrap_or_else(|_| "".to_string());
@@ -19,7 +70,8 @@ fn get_projects(root_path: String) -> Result<Vec<String>, String> {
                 if file_type.is_dir() {
                     if let Ok(name) = entry.file_name().into_string() {
                         if !name.starts_with('.') {
-                            projects.push(name);
+                            let project_type = determine_project_type(&entry.path());
+                            projects.push(Project { name, project_type });
                         }
                     }
                 }
@@ -27,8 +79,13 @@ fn get_projects(root_path: String) -> Result<Vec<String>, String> {
         }
     }
 
-    projects.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     Ok(projects)
+}
+
+#[tauri::command]
+fn quit_app() {
+    std::process::exit(0);
 }
 
 #[tauri::command]
@@ -105,7 +162,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![get_projects, open_project])
+        .invoke_handler(tauri::generate_handler![get_projects, open_project, quit_app])
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);

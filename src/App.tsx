@@ -1,14 +1,20 @@
 import { useEffect, useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Settings, RefreshCw, Folder } from 'lucide-react';
+import { Settings, RefreshCw, Folder, Box, Layers, Menu, LogOut } from 'lucide-react';
 import { useSettingsStore } from './store';
 import { SettingsDialog } from './SettingsDialog.tsx';
 import { Separator } from "@/components/ui/separator"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+
+type Project = {
+  name: string;
+  project_type: string;
+};
 
 function App() {
   const { projectsDir, preferredEditor, customEditorPath } = useSettingsStore();
-  const [projects, setProjects] = useState<string[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -16,7 +22,7 @@ function App() {
     if (!projectsDir) return;
     setLoading(true);
     try {
-      const result = await invoke<string[]>('get_projects', { rootPath: projectsDir });
+      const result = await invoke<Project[]>('get_projects', { rootPath: projectsDir });
       setProjects(result);
     } catch (e) {
       console.error(e);
@@ -56,9 +62,15 @@ function App() {
           <CommandEmpty className="py-6 text-center text-sm">No projects found.</CommandEmpty>
           <CommandGroup heading="Projects">
             {projects.map((proj) => (
-              <CommandItem key={proj} onSelect={() => openProject(proj)} className="cursor-pointer py-2">
-                <Folder className="mr-2 h-4 w-4 text-muted-foreground" />
-                <span>{proj}</span>
+              <CommandItem key={proj.name} onSelect={() => openProject(proj.name)} className="cursor-pointer py-2">
+                {proj.project_type === 'node' ? (
+                  <Box className="mr-2 h-4 w-4 text-primary" />
+                ) : proj.project_type === 'dotnet' ? (
+                  <Layers className="mr-2 h-4 w-4 text-blue-400" />
+                ) : (
+                  <Folder className="mr-2 h-4 w-4 text-muted-foreground" />
+                )}
+                <span>{proj.name}</span>
               </CommandItem>
             ))}
           </CommandGroup>
@@ -68,12 +80,22 @@ function App() {
       <Separator />
 
       <div className="flex justify-between items-center p-2 bg-muted/20">
-        <button 
-          onClick={() => setSettingsOpen(true)}
-          className="flex items-center text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded"
-        >
-          <Settings className="w-3.5 h-3.5 mr-1.5" /> Settings
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger className="flex items-center justify-center p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
+            <Menu className="w-4 h-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-48">
+            <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
+              <Settings className="mr-2 w-4 h-4 text-muted-foreground" />
+              <span>Settings</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => invoke('quit_app')}>
+              <LogOut className="mr-2 w-4 h-4 text-destructive" />
+              <span className="text-destructive">Quit Launcher</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <button 
           onClick={fetchProjects}
           className={`flex items-center text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded ${loading ? 'opacity-70' : ''}`}
