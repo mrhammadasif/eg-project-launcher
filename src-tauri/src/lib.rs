@@ -3,10 +3,14 @@ use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState, TrayIconEvent}
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct Project {
     name: String,
     project_type: String,
+    path: String,
+    has_git: bool,
+    git_branch: Option<String>,
+    git_status: Option<String>, // "clean", "dirty", "ahead", "behind"
 }
 
 fn determine_project_type(path: &std::path::Path) -> String {
@@ -52,6 +56,57 @@ fn determine_project_type(path: &std::path::Path) -> String {
     }
 }
 
+fn get_git_info(path: &std::path::Path) -> (bool, Option<String>, Option<String>) {
+    let git_dir = path.join(".git");
+    if !git_dir.exists() {
+        return (false, None, None);
+    }
+
+    // Get Branch
+    let branch_output = std::process::Command::new("git")
+        .current_dir(path)
+        .arg("rev-parse")
+        .arg("--abbrev-ref")
+        .arg("HEAD")
+        .output();
+        
+    let branch = match branch_output {
+        Ok(out) if out.status.success() => {
+            let b = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if b.is_empty() { None } else { Some(b) }
+        },
+        _ => None,
+    };
+
+    // Get Status (porcelain)
+    let status_output = std::process::Command::new("git")
+        .current_dir(path)
+        .arg("status")
+        .arg("--porcelain")
+        .arg("--branch")
+        .output();
+
+    let mut status_str = "clean".to_string();
+    if let Ok(out) = status_output {
+        if out.status.success() {
+            let output_str = String::from_utf8_lossy(&out.stdout);
+            let lines: Vec<&str> = output_str.lines().collect();
+            
+            if lines.len() > 1 {
+                status_str = "dirty".to_string();
+            } else if let Some(first_line) = lines.first() {
+                if first_line.contains("[ahead ") {
+                    status_str = "ahead".to_string();
+                } else if first_line.contains("[behind ") {
+                    status_str = "behind".to_string();
+                }
+            }
+        }
+    }
+
+    (true, branch, Some(status_str))
+}
+
 #[tauri::command]
 fn get_projects(root_path: String) -> Result<Vec<Project>, String> {
     let mut projects = Vec::new();
@@ -70,8 +125,18 @@ fn get_projects(root_path: String) -> Result<Vec<Project>, String> {
                 if file_type.is_dir() {
                     if let Ok(name) = entry.file_name().into_string() {
                         if !name.starts_with('.') {
-                            let project_type = determine_project_type(&entry.path());
-                            projects.push(Project { name, project_type });
+                            let project_path = entry.path();
+                            let project_type = determine_project_type(&project_path);
+                            let (has_git, git_branch, git_status) = get_git_info(&project_path);
+                            
+                            projects.push(Project { 
+                                name, 
+                                project_type,
+                                path: project_path.to_string_lossy().to_string(),
+                                has_git,
+                                git_branch,
+                                git_status
+                            });
                         }
                     }
                 }
@@ -156,13 +221,87 @@ fn open_project(app: tauri::AppHandle, editor: String, folder_path: String) -> R
     Ok(())
 }
 
+#[tauri::command]
+fn git_fetch(path: String) -> Result<(), String> {
+    std::process::Command::new("git")
+        .current_dir(path)
+        .arg("fetch")
+        .output()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn git_pull(path: String) -> Result<(), String> {
+    std::process::Command::new("git")
+        .current_dir(path)
+        .arg("pull")
+        .output()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn git_checkout(path: String, branch: String) -> Result<(), String> {
+    std::process::Command::new("git")
+        .current_dir(path)
+        .arg("checkout")
+        .arg(branch)
+        .output()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_git_branches(path: String) -> Result<Vec<String>, String> {
+    let output = std::process::Command::new("git")
+        .current_dir(path)
+        .arg("branch")
+        .arg("--format=%(refname:short)")
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if output.status.success() {
+        let branches_str = String::from_utf8_lossy(&output.stdout);
+        let branches = branches_str.lines()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        Ok(branches)
+    } else {
+        Err("Failed to get branches".to_string())
+    }
+}
+
+#[tauri::command]
+fn open_in_tower(path: String) -> Result<(), String> {
+    // Attempt to run `gittower` command, or fallback to native `open -a Tower`
+    let status = std::process::Command::new("gittower")
+        .arg(&path)
+        .status();
+        
+    if status.is_err() || !status.unwrap().success() {
+        std::process::Command::new("open")
+            .arg("-a")
+            .arg("Tower")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![get_projects, open_project, quit_app])
+        .invoke_handler(tauri::generate_handler![
+            get_projects, open_project, quit_app,
+            git_fetch, git_pull, git_checkout, get_git_branches, open_in_tower
+        ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
