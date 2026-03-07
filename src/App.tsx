@@ -45,6 +45,8 @@ function App() {
     description: '',
   });
   
+  const [activeGitActions, setActiveGitActions] = useState<Record<string, 'fetch' | 'pull' | 'tower'>>({});
+  
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const fetchProjects = useCallback(async () => {
@@ -52,7 +54,24 @@ function App() {
     setLoading(true);
     try {
       const baseProjects = await invoke<Project[]>('get_projects', { rootPath: projectsDir });
-      setProjects(baseProjects);
+      
+      setProjects(prevProjects => {
+        const existingMap = new Map(prevProjects.map(p => [p.name, p]));
+        return baseProjects.map(base => {
+          const existing = existingMap.get(base.name);
+          if (existing) {
+            return {
+              ...base,
+              has_git: existing.has_git,
+              git_branch: existing.git_branch,
+              git_status: existing.git_status,
+              git_ahead: existing.git_ahead,
+              git_behind: existing.git_behind,
+            };
+          }
+          return base;
+        });
+      });
 
       // Fetch git info asynchronously for each project in the background
       baseProjects.forEach(async (proj) => {
@@ -98,21 +117,32 @@ function App() {
     }
   };
 
-  const executeGitAction = async (e: React.MouseEvent | React.PointerEvent, action: string, path: string) => {
+  const executeGitAction = async (e: React.MouseEvent | React.PointerEvent, action: 'fetch' | 'pull' | 'tower', path: string) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    // Prevent starting another action if one is already running for this project
+    if (activeGitActions[path]) return;
+    
+    setActiveGitActions(prev => ({ ...prev, [path]: action }));
     try {
       if (action === 'tower') {
         await invoke('open_in_tower', { path });
       } else if (action === 'fetch') {
         await invoke('git_fetch', { path });
-        fetchProjects();
+        await fetchProjects();
       } else if (action === 'pull') {
         await invoke('git_pull', { path });
-        fetchProjects();
+        await fetchProjects();
       }
     } catch (e) {
       console.error(e);
+    } finally {
+      setActiveGitActions(prev => {
+        const next = { ...prev };
+        delete next[path];
+        return next;
+      });
     }
   };
 
@@ -221,10 +251,20 @@ function App() {
           <CommandEmpty className="py-6 text-center text-sm">No projects found.</CommandEmpty>
           <CommandGroup heading="Projects">
             {projects.map((proj) => (
-              <CommandItem key={proj.name} className="cursor-pointer py-2 group flex items-center justify-between">
+              <CommandItem 
+                key={proj.name} 
+                className="cursor-pointer py-2 group flex items-center justify-between"
+                onSelect={() => {
+                  if (proj.project_type === 'dotnet' && proj.sln_files && proj.sln_files.length > 1) {
+                    setOpenSlnDropdown(openSlnDropdown === proj.name ? null : proj.name);
+                  } else {
+                    openProject(proj.name);
+                  }
+                }}
+              >
                 {proj.project_type === 'dotnet' && proj.sln_files && proj.sln_files.length > 1 ? (
                   <DropdownMenu open={openSlnDropdown === proj.name} onOpenChange={(o) => setOpenSlnDropdown(o ? proj.name : null)}>
-                    <DropdownMenuTrigger className="flex flex-1 items-center min-w-0 pr-2 cursor-pointer hover:text-white hover:bg-white/10 rounded px-1 py-2 outline-none text-left">
+                    <DropdownMenuTrigger className="flex flex-1 items-center min-w-0 pr-2 outline-none text-left pointer-events-none">
                       <Layers className="mr-2 h-4 w-4 shrink-0 text-blue-400" />
                       <span className="truncate flex-1">{shortenTheFolderName(proj.name)}</span>
                     </DropdownMenuTrigger>
@@ -247,7 +287,7 @@ function App() {
                     </DropdownMenuContent>
                   </DropdownMenu>
                 ) : (
-                  <div onClick={() => openProject(proj.name)} className="flex flex-1 items-center min-w-0 pr-2 cursor-pointer hover:text-white hover:bg-white/10 rounded px-1 py-2">
+                  <div className="flex flex-1 items-center min-w-0 pr-2 pointer-events-none">
                     {proj.project_type === 'node' ? (
                       <Box className="mr-2 h-4 w-4 shrink-0 text-primary" />
                     ) : proj.project_type === 'dotnet' ? (
@@ -265,35 +305,47 @@ function App() {
                       <>
                         <Tooltip>
                           <TooltipTrigger 
-                            className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex outline-none" 
+                            className={`p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex outline-none ${activeGitActions[proj.path] === 'fetch' ? 'opacity-50 cursor-not-allowed' : ''}`}
                             onClick={(e) => executeGitAction(e, 'fetch', proj.path)}
                             onPointerDown={(e) => e.stopPropagation()}
+                            disabled={!!activeGitActions[proj.path]}
                           >
-                            <ArrowDownLeft strokeDasharray="2 2" strokeWidth={1.5} className="w-3.5 h-3.5" />
+                            {activeGitActions[proj.path] === 'fetch' 
+                              ? <RefreshCw strokeWidth={1.5} className="w-3.5 h-3.5 animate-spin" />
+                              : <ArrowDownLeft strokeDasharray="2 2" strokeWidth={1.5} className="w-3.5 h-3.5" />
+                            }
                           </TooltipTrigger>
-                          <TooltipContent><p className="text-xs">Fetch</p></TooltipContent>
+                          <TooltipContent><p className="text-xs">{activeGitActions[proj.path] === 'fetch' ? 'Fetching...' : 'Fetch'}</p></TooltipContent>
                         </Tooltip>
 
                         <Tooltip>
                           <TooltipTrigger 
-                            className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex outline-none" 
+                            className={`p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex outline-none ${activeGitActions[proj.path] === 'pull' ? 'opacity-50 cursor-not-allowed' : ''}`}
                             onClick={(e) => executeGitAction(e, 'pull', proj.path)}
                             onPointerDown={(e) => e.stopPropagation()}
+                            disabled={!!activeGitActions[proj.path]}
                           >
-                            <Download strokeWidth={1.5} className="w-3.5 h-3.5" />
+                            {activeGitActions[proj.path] === 'pull'
+                              ? <RefreshCw strokeWidth={1.5} className="w-3.5 h-3.5 animate-spin" />
+                              : <Download strokeWidth={1.5} className="w-3.5 h-3.5" />
+                            }
                           </TooltipTrigger>
-                          <TooltipContent><p className="text-xs">Pull</p></TooltipContent>
+                          <TooltipContent><p className="text-xs">{activeGitActions[proj.path] === 'pull' ? 'Pulling...' : 'Pull'}</p></TooltipContent>
                         </Tooltip>
 
                         <Tooltip>
                           <TooltipTrigger 
-                            className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-blue-400 inline-flex outline-none" 
+                            className={`p-1 hover:bg-muted rounded text-muted-foreground hover:text-blue-400 inline-flex outline-none ${activeGitActions[proj.path] === 'tower' ? 'opacity-50 cursor-not-allowed' : ''}`}
                             onClick={(e) => executeGitAction(e, 'tower', proj.path)}
                             onPointerDown={(e) => e.stopPropagation()}
+                            disabled={!!activeGitActions[proj.path]}
                           >
-                            <TerminalSquare strokeWidth={1.5} className="w-3.5 h-3.5" />
+                            {activeGitActions[proj.path] === 'tower'
+                              ? <RefreshCw strokeWidth={1.5} className="w-3.5 h-3.5 animate-spin" />
+                              : <TerminalSquare strokeWidth={1.5} className="w-3.5 h-3.5" />
+                            }
                           </TooltipTrigger>
-                          <TooltipContent><p className="text-xs">Open in Tower</p></TooltipContent>
+                          <TooltipContent><p className="text-xs">{activeGitActions[proj.path] === 'tower' ? 'Opening...' : 'Open in Tower'}</p></TooltipContent>
                         </Tooltip>
                       </>
                     )}
@@ -318,6 +370,8 @@ function App() {
                       <DropdownMenuTrigger 
                         className={`flex items-center text-xs space-x-1.5 px-2 py-0.5 rounded cursor-pointer transition-colors outline-none ${openBranchDropdown === proj.path ? 'bg-muted' : 'bg-muted/50 hover:bg-muted'}`}
                         title="Click to check out branch"
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
                       >
                         <span className={`max-w-[140px] truncate ${getStatusColor(proj.git_status)}`}>
                           {proj.git_branch}
