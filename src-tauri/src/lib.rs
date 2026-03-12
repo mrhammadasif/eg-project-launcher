@@ -354,6 +354,52 @@ async fn open_in_tower(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn open_in_finder(path: String) -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn open_in_ide(path: String, ide: String) -> Result<(), String> {
+    if ide == "Claude Code" {
+        let script = format!(
+            "tell application \"iTerm\"\n\
+             activate\n\
+             set newWindow to (create window with default profile)\n\
+             tell current session of newWindow\n\
+             write text \"cd '{}' && claude\"\n\
+             end tell\n\
+             end tell",
+            path
+        );
+        std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(script)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    let app_name = match ide.as_str() {
+        "Cursor" => "Cursor",
+        "Antigravity" => "Antigravity",
+        "VSCode" => "Visual Studio Code",
+        _ => &ide
+    };
+
+    std::process::Command::new("open")
+        .arg("-a")
+        .arg(app_name)
+        .arg(&path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -374,7 +420,9 @@ pub fn run() {
             quit_app,
             git_fetch,
             get_git_branches,
-            open_in_tower
+            open_in_tower,
+            open_in_finder,
+            open_in_ide
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

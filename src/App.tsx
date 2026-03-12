@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
 
-import { Settings, RefreshCw, Folder, Box, Layers, Menu, LogOut, GitBranch, ArrowDownLeft, Download } from 'lucide-react';
+import { Settings, RefreshCw, Folder, Box, Layers, Menu, LogOut, GitBranch, ArrowDownLeft, Download, FolderSearch, Sparkles } from 'lucide-react';
 import GithubIcon from "@/components/svg/GithubIcon.tsx"
 import { useSettingsStore } from './store';
 import { SettingsDialog } from './SettingsDialog.tsx';
@@ -48,7 +48,7 @@ function App() {
     description: '',
   });
   
-  const [activeGitActions, setActiveGitActions] = useState<Record<string, 'fetch' | 'pull' | 'tower'>>({});
+  const [activeGitActions, setActiveGitActions] = useState<Record<string, 'fetch' | 'pull' | 'tower' | 'finder'>>({});
   
   const abortControllerRef = useRef<AbortController | null>(null);
   const commandListRef = useRef<HTMLDivElement>(null);
@@ -124,7 +124,7 @@ function App() {
     }
   };
 
-  const executeGitAction = async (e: React.MouseEvent | React.PointerEvent, action: 'fetch' | 'pull' | 'tower', path: string) => {
+  const executeGitAction = async (e: React.MouseEvent | React.PointerEvent, action: 'fetch' | 'pull' | 'tower' | 'finder', path: string) => {
     e.preventDefault();
     e.stopPropagation();
     
@@ -141,6 +141,8 @@ function App() {
       } else if (action === 'pull') {
         await invoke('git_pull', { path });
         await fetchProjects();
+      } else if (action === 'finder') {
+        await invoke('open_in_finder', { path });
       }
     } catch (e) {
       console.error(e);
@@ -341,6 +343,48 @@ function App() {
                         </Tooltip>
                       </>
                     )}
+
+                    <Tooltip>
+                      <TooltipTrigger 
+                        className={`p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex outline-none ${activeGitActions[proj.path] === 'finder' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        onClick={(e) => executeGitAction(e, 'finder', proj.path)}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        disabled={!!activeGitActions[proj.path]}
+                      >
+                        {activeGitActions[proj.path] === 'finder'
+                          ? <RefreshCw strokeWidth={1.5} className="w-3.5 h-3.5 animate-spin" />
+                          : <FolderSearch strokeWidth={1.5} className="w-3.5 h-3.5" />
+                        }
+                      </TooltipTrigger>
+                      <TooltipContent><p className="text-xs">Reveal in Finder</p></TooltipContent>
+                    </Tooltip>
+
+                    <DropdownMenu>
+                      <DropdownMenuTrigger 
+                        className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground inline-flex outline-none"
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                      >
+                        <Sparkles strokeWidth={1.5} className="w-3.5 h-3.5" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent onClick={(e) => e.stopPropagation()} align="end" className="w-40">
+                        <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-b mb-1">
+                          Open in IDE
+                        </div>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); invoke('open_in_ide', { path: proj.path, ide: 'Cursor' }) }}>
+                          <span className="truncate">Cursor</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); invoke('open_in_ide', { path: proj.path, ide: 'Antigravity' }) }}>
+                          <span className="truncate">Antigravity</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); invoke('open_in_ide', { path: proj.path, ide: 'VSCode' }) }}>
+                          <span className="truncate">VSCode</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); invoke('open_in_ide', { path: proj.path, ide: 'Claude Code' }) }}>
+                          <span className="truncate">Claude Code</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
 
                   {proj.has_git && proj.git_branch && (
