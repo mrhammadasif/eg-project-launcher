@@ -12,6 +12,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
+// when the launcher is closed, the search will reset after this milliseconds
+const BLUR_RESET_TIME = 3_000
 type Project = {
   name: string;
   project_type: string;
@@ -37,6 +39,9 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  
+  const [searchQuery, setSearchQuery] = useState("");
+  const lastBlurTime = useRef<number>(Date.now());
   
   const [openSlnDropdown, setOpenSlnDropdown] = useState<string | null>(null);
   
@@ -102,11 +107,24 @@ function App() {
   }, [fetchProjects]);
   
   useEffect(() => {
-    const handleFocus = () => fetchProjects();
+    const handleFocus = () => {
+      fetchProjects();
+      if (Date.now() - lastBlurTime.current > BLUR_RESET_TIME) {
+        setTimeout(() => {
+          setSearchQuery("");
+        }, 100)
+      }
+    };
+    const handleBlur = () => {
+      lastBlurTime.current = Date.now();
+    };
+
     window.addEventListener('focus', handleFocus);
+    window.addEventListener('blur', handleBlur);
 
     return () => {
       window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
     };
   }, [fetchProjects]);
 
@@ -119,6 +137,7 @@ function App() {
       }
       setOpenSlnDropdown(null);
       await invoke('open_project', { editor: editorToUse, folderPath, specificFile });
+      setSearchQuery("");
     } catch (e) {
       console.error(e);
     }
@@ -127,6 +146,7 @@ function App() {
   const executeGitAction = async (e: React.MouseEvent | React.PointerEvent, action: 'fetch' | 'pull' | 'tower' | 'finder', path: string) => {
     e.preventDefault();
     e.stopPropagation();
+    setSearchQuery("");
     
     // Prevent starting another action if one is already running for this project
     if (activeGitActions[path]) return;
@@ -165,6 +185,7 @@ function App() {
   };
 
   const handleGlobalGitAction = async (action: 'refresh' | 'fetch') => {
+    setSearchQuery("");
     const gitProjects = projects.filter(p => p.has_git);
     if (!gitProjects.length) return;
 
@@ -223,6 +244,7 @@ function App() {
   const [projectBranches, setProjectBranches] = useState<Record<string, string[]>>({});
 
   const executeBranchSwitch = async (path: string, branchName: string) => {
+    setSearchQuery("");
     setLoading(true);
     setOpenBranchDropdown(null);
     try {
@@ -240,6 +262,15 @@ function App() {
     return folderName.replace("EG.Applications.", "APP:").replace("EG.Services.", "SVC:").replace("EG.HttpAggregators.", "AGG:")
   }
 
+  const openInIde = async (path: string, ide: string) => {
+    setSearchQuery("");
+    try {
+      await invoke('open_in_ide', { path, ide });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   return (
     <TooltipProvider delay={300}>
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
@@ -249,7 +280,9 @@ function App() {
             placeholder="Search projects..." 
             autoFocus 
             className="h-9" 
-            onValueChange={() => {
+            value={searchQuery}
+            onValueChange={(val) => {
+              setSearchQuery(val);
               if (commandListRef.current) {
                 commandListRef.current.scrollTop = 0;
               }
@@ -371,16 +404,16 @@ function App() {
                         <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-b mb-1">
                           Open in IDE
                         </div>
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); invoke('open_in_ide', { path: proj.path, ide: 'Cursor' }) }}>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openInIde(proj.path, 'Cursor') }}>
                           <span className="truncate">Cursor</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); invoke('open_in_ide', { path: proj.path, ide: 'Antigravity' }) }}>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openInIde(proj.path, 'Antigravity') }}>
                           <span className="truncate">Antigravity</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); invoke('open_in_ide', { path: proj.path, ide: 'VSCode' }) }}>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openInIde(proj.path, 'VSCode') }}>
                           <span className="truncate">VSCode</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); invoke('open_in_ide', { path: proj.path, ide: 'Claude Code' }) }}>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openInIde(proj.path, 'Claude Code') }}>
                           <span className="truncate">Claude Code</span>
                         </DropdownMenuItem>
                       </DropdownMenuContent>
