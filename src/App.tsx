@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 import { Settings, RefreshCw, Folder, Box, Layers, Menu, LogOut, GitBranch, ArrowDownLeft, Download, FolderSearch, Sparkles } from 'lucide-react';
 import GithubIcon from "@/components/svg/GithubIcon.tsx"
-import { useSettingsStore } from './store';
+import { PREFERRED_EDITOR, isPreferredEditor, useSettingsStore } from './store';
 import { SettingsDialog } from './SettingsDialog.tsx';
 import { Separator } from "@/components/ui/separator"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
@@ -35,13 +35,19 @@ type ProjectGitInfo = {
 }
 
 function App() {
-  const { projectsDir, preferredEditor, customEditorPath, recentSlns, setRecentSln } = useSettingsStore();
+  const { projectsDir, preferredEditor, recentSlns, setRecentSln } = useSettingsStore();
   const [projects, setProjects] = useState<Project[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   
   const [searchQuery, setSearchQuery] = useState("");
   const lastBlurTime = useRef<number>(Date.now());
+  const commandInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    commandInputRef.current?.focus()
+  }, [searchQuery])
+
+  
   
   const [openSlnDropdown, setOpenSlnDropdown] = useState<string | null>(null);
   
@@ -130,7 +136,9 @@ function App() {
 
   const openProject = async (folderName: string, specificFile: string | null = null) => {
     const folderPath = `${projectsDir.replace(/\/$/, '')}/${folderName}`;
-    const editorToUse = customEditorPath || preferredEditor;
+    const editorToUse = isPreferredEditor(preferredEditor)
+      ? preferredEditor
+      : PREFERRED_EDITOR.VISUAL_STUDIO_CODE;
     try {
       if (specificFile) {
         setRecentSln(folderName, specificFile);
@@ -277,6 +285,7 @@ function App() {
       <Command className="rounded-none border-b-0 h-full flex flex-col pt-2">
         <div className="px-3 pb-2 pt-1">
           <CommandInput 
+            ref={commandInputRef}
             placeholder="Search projects..." 
             autoFocus 
             className="h-9" 

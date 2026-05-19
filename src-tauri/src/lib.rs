@@ -288,7 +288,9 @@ fn open_project(
                 // Open the specific solution file using Rider
                 open_target = sln_path.to_string_lossy().to_string();
             } else if has_package_json {
-                final_editor = "Cursor".to_string();
+                if final_editor.trim().is_empty() {
+                    final_editor = "Visual Studio Code".to_string();
+                }
             }
         }
     }

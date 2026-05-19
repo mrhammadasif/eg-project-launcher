@@ -2,11 +2,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { useSettingsStore } from './store';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { PREFERRED_EDITOR, PREFERRED_EDITORS, isPreferredEditor, useSettingsStore } from './store';
 import { open } from '@tauri-apps/plugin-dialog';
 
 export function SettingsDialog({ open: isOpen, onOpenChange }: { open: boolean, onOpenChange: (open: boolean) => void }) {
-  const { projectsDir, preferredEditor, customEditorPath, setProjectsDir, setPreferredEditor, setCustomEditorPath } = useSettingsStore();
+  const { projectsDir, preferredEditor, setProjectsDir, setPreferredEditor } = useSettingsStore();
+  const selectedPreferredEditor = isPreferredEditor(preferredEditor)
+    ? preferredEditor
+    : PREFERRED_EDITOR.VISUAL_STUDIO_CODE;
 
   const handleSelectDir = async () => {
     try {
@@ -47,24 +51,26 @@ export function SettingsDialog({ open: isOpen, onOpenChange }: { open: boolean, 
           </div>
           
           <div className="grid gap-2">
-            <Label htmlFor="preferredEditor">Preferred Editor App Name</Label>
-            <Input 
-              id="preferredEditor" 
-              value={preferredEditor} 
-              onChange={(e) => setPreferredEditor(e.target.value)} 
-              placeholder="Visual Studio Code"
-            />
-            <p className="text-[11px] text-muted-foreground">Examples: "Visual Studio Code", "Cursor", "WebStorm"</p>
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="customEditorPath">Custom Editor Path (Optional)</Label>
-            <Input 
-              id="customEditorPath" 
-              value={customEditorPath} 
-              onChange={(e) => setCustomEditorPath(e.target.value)} 
-              placeholder="/Applications/Cursor.app/Contents/MacOS/Cursor"
-            />
+            <Label htmlFor="preferredEditor">Default Editor</Label>
+            <Select
+              value={selectedPreferredEditor}
+              onValueChange={(value) => {
+                if (value && isPreferredEditor(value)) {
+                  setPreferredEditor(value);
+                }
+              }}
+            >
+              <SelectTrigger id="preferredEditor" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PREFERRED_EDITORS.map((editor) => (
+                  <SelectItem key={editor} value={editor}>
+                    {editor}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </DialogContent>
