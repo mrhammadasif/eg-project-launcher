@@ -34,11 +34,16 @@ type ProjectGitInfo = {
   git_behind: number | null;
 }
 
+type LauncherConfig = {
+  trusted_root: string;
+}
+
 function App() {
-  const { projectsDir, preferredEditor, recentSlns, setRecentSln } = useSettingsStore();
+  const { projectsDir, preferredEditor, recentSlns, setProjectsDir, setRecentSln } = useSettingsStore();
   const [projects, setProjects] = useState<Project[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [configLoaded, setConfigLoaded] = useState(false);
   
   const [searchQuery, setSearchQuery] = useState("");
   const lastBlurTime = useRef<number>(Date.now());
@@ -64,11 +69,23 @@ function App() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const commandListRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    invoke<LauncherConfig>('get_launcher_config')
+      .then((config) => {
+        setProjectsDir(config.trusted_root);
+        setConfigLoaded(true);
+      })
+      .catch((error) => {
+        console.error('Failed to load launcher config', error);
+        setConfigLoaded(true);
+      });
+  }, [setProjectsDir]);
+
   const fetchProjects = useCallback(async () => {
-    if (!projectsDir) return;
+    if (!configLoaded || !projectsDir) return;
     setLoading(true);
     try {
-      const baseProjects = await invoke<Project[]>('get_projects', { rootPath: projectsDir });
+      const baseProjects = await invoke<Project[]>('get_projects');
       
       setProjects(prevProjects => {
         const existingMap = new Map(prevProjects.map(p => [p.name, p]));
@@ -106,7 +123,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [projectsDir]);
+  }, [configLoaded, projectsDir]);
 
   useEffect(() => {
     fetchProjects();

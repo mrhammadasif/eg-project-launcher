@@ -2,6 +2,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::Manager;
 
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Project {
@@ -25,7 +26,147 @@ struct ProjectGitInfo {
     git_behind: Option<u32>,
 }
 
-fn determine_project_type(path: &std::path::Path) -> (String, Vec<String>) {
+#[derive(Serialize, Clone)]
+struct LauncherConfig {
+    trusted_root: String,
+}
+
+struct TrustedRoot {
+    path: PathBuf,
+}
+
+const CONFIG_YAML: &str = include_str!("../../config.yaml");
+
+fn expand_home(path: &str) -> String {
+    if path == "~" {
+        std::env::var("HOME").unwrap_or_else(|_| path.to_string())
+    } else if path.starts_with("~/") {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "".to_string());
+        path.replacen("~", &home, 1)
+    } else {
+        path.to_string()
+    }
+}
+
+fn canonicalize_root(root_path: &str) -> Result<PathBuf, String> {
+    let root = PathBuf::from(expand_home(root_path));
+    let root = root.canonicalize().map_err(|e| e.to_string())?;
+
+    if !root.is_dir() {
+        return Err("Project root must be a directory".to_string());
+    }
+
+    Ok(root)
+}
+
+fn configured_trusted_root() -> Result<String, String> {
+    for line in CONFIG_YAML.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        if let Some(value) = line.strip_prefix("trusted_root:") {
+            let value = value.trim().trim_matches('"').trim_matches('\'');
+            if value.is_empty() {
+                return Err("config.yaml trusted_root cannot be empty".to_string());
+            }
+            return Ok(value.to_string());
+        }
+    }
+
+    Err("config.yaml must define trusted_root".to_string())
+}
+
+fn configured_trusted_root_path() -> Result<PathBuf, String> {
+    canonicalize_root(&configured_trusted_root()?)
+}
+
+fn validate_project_path(
+    trusted_root: &TrustedRoot,
+    candidate_path: &str,
+) -> Result<PathBuf, String> {
+    let candidate = PathBuf::from(expand_home(candidate_path))
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+
+    if !candidate.starts_with(&trusted_root.path) {
+        return Err("Path is outside the configured projects root".to_string());
+    }
+
+    Ok(candidate)
+}
+
+fn validate_specific_file(project_path: &Path, specific_file: &str) -> Result<PathBuf, String> {
+    let file = PathBuf::from(expand_home(specific_file))
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+
+    if !file.starts_with(project_path) {
+        return Err("Solution file is outside the selected project".to_string());
+    }
+
+    if !file.is_file() {
+        return Err("Solution file must be a file".to_string());
+    }
+
+    let extension = file.extension().and_then(|ext| ext.to_str());
+    if !matches!(extension, Some("sln") | Some("slnx")) {
+        return Err("Only .sln and .slnx files can be opened as solution files".to_string());
+    }
+
+    Ok(file)
+}
+
+fn allowed_project_editor(editor: &str) -> Option<&'static str> {
+    match editor {
+        "Visual Studio Code" => Some("Visual Studio Code"),
+        "Cursor" => Some("Cursor"),
+        "Antigravity" => Some("Antigravity"),
+        "WebStorm" => Some("WebStorm"),
+        _ => None,
+    }
+}
+
+fn allowed_ide(ide: &str) -> Option<&'static str> {
+    match ide {
+        "Cursor" => Some("Cursor"),
+        "Antigravity" => Some("Antigravity"),
+        "VSCode" => Some("Visual Studio Code"),
+        "Claude Code" => Some("Claude Code"),
+        _ => None,
+    }
+}
+
+fn git_program() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "/usr/bin/git"
+    } else {
+        "git"
+    }
+}
+
+fn open_program() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "/usr/bin/open"
+    } else {
+        "open"
+    }
+}
+
+fn osascript_program() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "/usr/bin/osascript"
+    } else {
+        "osascript"
+    }
+}
+
+fn escape_applescript_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn determine_project_type(path: &Path) -> (String, Vec<String>) {
     let mut has_package_json = false;
     let mut sln_files = Vec::new();
 
@@ -72,7 +213,7 @@ fn determine_project_type(path: &std::path::Path) -> (String, Vec<String>) {
 }
 
 fn get_git_info(
-    path: &std::path::Path,
+    path: &Path,
 ) -> (
     bool,
     Option<String>,
@@ -86,7 +227,7 @@ fn get_git_info(
     }
 
     // Get Branch
-    let branch_output = std::process::Command::new("git")
+    let branch_output = std::process::Command::new(git_program())
         .current_dir(path)
         .arg("rev-parse")
         .arg("--abbrev-ref")
@@ -106,7 +247,7 @@ fn get_git_info(
     };
 
     // Get Status (porcelain)
-    let status_output = std::process::Command::new("git")
+    let status_output = std::process::Command::new(git_program())
         .current_dir(path)
         .arg("status")
         .arg("--porcelain")
@@ -158,14 +299,18 @@ fn get_git_info(
 }
 
 #[tauri::command]
-fn get_projects(root_path: String) -> Result<Vec<Project>, String> {
+fn get_launcher_config(
+    trusted_root: tauri::State<'_, TrustedRoot>,
+) -> Result<LauncherConfig, String> {
+    Ok(LauncherConfig {
+        trusted_root: trusted_root.path.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+fn get_projects(trusted_root: tauri::State<'_, TrustedRoot>) -> Result<Vec<Project>, String> {
     let mut projects = Vec::new();
-    let path = if root_path.starts_with("~/") {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "".to_string());
-        root_path.replacen("~", &home, 1)
-    } else {
-        root_path
-    };
+    let path = trusted_root.path.clone();
 
     let entries = std::fs::read_dir(path).map_err(|e| e.to_string())?;
 
@@ -205,9 +350,12 @@ fn get_projects(root_path: String) -> Result<Vec<Project>, String> {
 }
 
 #[tauri::command]
-async fn get_project_git_info(path: String) -> Result<ProjectGitInfo, String> {
-    let (has_git, git_branch, git_status, git_ahead, git_behind) =
-        get_git_info(std::path::Path::new(&path));
+async fn get_project_git_info(
+    trusted_root: tauri::State<'_, TrustedRoot>,
+    path: String,
+) -> Result<ProjectGitInfo, String> {
+    let project_path = validate_project_path(&trusted_root, &path)?;
+    let (has_git, git_branch, git_status, git_ahead, git_behind) = get_git_info(&project_path);
     Ok(ProjectGitInfo {
         has_git,
         git_branch,
@@ -225,29 +373,28 @@ fn quit_app() {
 #[tauri::command]
 fn open_project(
     app: tauri::AppHandle,
+    trusted_root: tauri::State<'_, TrustedRoot>,
     editor: String,
     folder_path: String,
     specific_file: Option<String>,
 ) -> Result<(), String> {
+    let path = validate_project_path(&trusted_root, &folder_path)?;
+
+    let mut final_editor = allowed_project_editor(&editor)
+        .ok_or_else(|| "Unsupported editor".to_string())?
+        .to_string();
+    let mut open_target = path.clone();
+
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
-    let path = if folder_path.starts_with("~/") {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "".to_string());
-        folder_path.replacen("~", &home, 1)
-    } else {
-        folder_path.clone()
-    };
-
-    let mut final_editor = editor;
-    let mut open_target = path.clone();
 
     if let Some(specific) = specific_file {
         final_editor = "Rider".to_string();
-        open_target = specific;
+        open_target = validate_specific_file(&path, &specific)?;
     } else {
         // Check directory contents for specific project structures
-        if let Ok(src_entries) = std::fs::read_dir(std::path::Path::new(&path).join("src")) {
+        if let Ok(src_entries) = std::fs::read_dir(path.join("src")) {
             let mut has_package_json = false;
             let mut sln_file = None;
 
@@ -272,7 +419,7 @@ fn open_project(
                                 let sub_name = sub_entry.file_name().to_string_lossy().to_string();
                                 if sub_name == "package.json" {
                                     has_package_json = true;
-                                    open_target = entry.path().to_string_lossy().to_string();
+                                    open_target = entry.path();
                                 } else if sub_name.ends_with(".sln") || sub_name.ends_with(".slnx")
                                 {
                                     sln_file = Some(sub_entry.path());
@@ -286,7 +433,7 @@ fn open_project(
             if let Some(sln_path) = sln_file {
                 final_editor = "Rider".to_string();
                 // Open the specific solution file using Rider
-                open_target = sln_path.to_string_lossy().to_string();
+                open_target = sln_path;
             } else if has_package_json {
                 if final_editor.trim().is_empty() {
                     final_editor = "Visual Studio Code".to_string();
@@ -295,7 +442,7 @@ fn open_project(
         }
     }
 
-    let _ = std::process::Command::new("open")
+    let _ = std::process::Command::new(open_program())
         .arg("-a")
         .arg(&final_editor)
         .arg(&open_target)
@@ -306,21 +453,90 @@ fn open_project(
 }
 
 #[tauri::command]
-async fn git_fetch(path: String) -> Result<(), String> {
-    std::process::Command::new("git")
-        .current_dir(path)
+async fn git_fetch(
+    trusted_root: tauri::State<'_, TrustedRoot>,
+    path: String,
+) -> Result<(), String> {
+    let project_path = validate_project_path(&trusted_root, &path)?;
+    let output = std::process::Command::new(git_program())
+        .current_dir(project_path)
         .arg("fetch")
         .arg("--prune")
         .arg("--all")
         .output()
         .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
     Ok(())
 }
 
 #[tauri::command]
-async fn get_git_branches(path: String) -> Result<Vec<String>, String> {
-    let output = std::process::Command::new("git")
-        .current_dir(path)
+async fn git_pull(trusted_root: tauri::State<'_, TrustedRoot>, path: String) -> Result<(), String> {
+    let project_path = validate_project_path(&trusted_root, &path)?;
+    let output = std::process::Command::new(git_program())
+        .current_dir(project_path)
+        .arg("pull")
+        .arg("--ff-only")
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn git_checkout(
+    trusted_root: tauri::State<'_, TrustedRoot>,
+    path: String,
+    branch: String,
+) -> Result<(), String> {
+    if branch.starts_with('-') {
+        return Err("Invalid branch name".to_string());
+    }
+
+    let project_path = validate_project_path(&trusted_root, &path)?;
+
+    let validation = std::process::Command::new(git_program())
+        .current_dir(&project_path)
+        .arg("check-ref-format")
+        .arg("--branch")
+        .arg(&branch)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !validation.status.success() {
+        return Err("Invalid branch name".to_string());
+    }
+
+    let output = std::process::Command::new(git_program())
+        .current_dir(project_path)
+        .arg("switch")
+        .arg("--")
+        .arg(&branch)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_git_branches(
+    trusted_root: tauri::State<'_, TrustedRoot>,
+    path: String,
+) -> Result<Vec<String>, String> {
+    let project_path = validate_project_path(&trusted_root, &path)?;
+    let output = std::process::Command::new(git_program())
+        .current_dir(project_path)
         .arg("branch")
         .arg("--format=%(refname:short)")
         .output()
@@ -340,15 +556,21 @@ async fn get_git_branches(path: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-async fn open_in_tower(path: String) -> Result<(), String> {
+async fn open_in_tower(
+    trusted_root: tauri::State<'_, TrustedRoot>,
+    path: String,
+) -> Result<(), String> {
+    let project_path = validate_project_path(&trusted_root, &path)?;
     // Attempt to run `gittower` command, or fallback to native `open -a Tower`
-    let status = std::process::Command::new("gittower").arg(&path).status();
+    let status = std::process::Command::new("gittower")
+        .arg(&project_path)
+        .status();
 
     if status.is_err() || !status.unwrap().success() {
-        std::process::Command::new("open")
+        std::process::Command::new(open_program())
             .arg("-a")
             .arg("Tower")
-            .arg(&path)
+            .arg(&project_path)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
@@ -357,28 +579,41 @@ async fn open_in_tower(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn open_in_finder(path: String) -> Result<(), String> {
-    std::process::Command::new("open")
-        .arg(&path)
+async fn open_in_finder(
+    trusted_root: tauri::State<'_, TrustedRoot>,
+    path: String,
+) -> Result<(), String> {
+    let project_path = validate_project_path(&trusted_root, &path)?;
+    std::process::Command::new(open_program())
+        .arg(&project_path)
         .spawn()
         .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-async fn open_in_ide(path: String, ide: String) -> Result<(), String> {
-    if ide == "Claude Code" {
+async fn open_in_ide(
+    trusted_root: tauri::State<'_, TrustedRoot>,
+    path: String,
+    ide: String,
+) -> Result<(), String> {
+    let project_path = validate_project_path(&trusted_root, &path)?;
+    let app_name = allowed_ide(&ide).ok_or_else(|| "Unsupported IDE".to_string())?;
+
+    if app_name == "Claude Code" {
+        let path = escape_applescript_string(&project_path.to_string_lossy());
         let script = format!(
             "tell application \"iTerm\"\n\
              activate\n\
+             set projectPath to \"{}\"\n\
              set newWindow to (create window with default profile)\n\
              tell current session of newWindow\n\
-             write text \"cd '{}' && claude\"\n\
+             write text \"cd \" & quoted form of projectPath & \" && claude\"\n\
              end tell\n\
              end tell",
             path
         );
-        std::process::Command::new("osascript")
+        std::process::Command::new(osascript_program())
             .arg("-e")
             .arg(script)
             .spawn()
@@ -386,17 +621,10 @@ async fn open_in_ide(path: String, ide: String) -> Result<(), String> {
         return Ok(());
     }
 
-    let app_name = match ide.as_str() {
-        "Cursor" => "Cursor",
-        "Antigravity" => "Antigravity",
-        "VSCode" => "Visual Studio Code",
-        _ => &ide
-    };
-
-    std::process::Command::new("open")
+    std::process::Command::new(open_program())
         .arg("-a")
         .arg(app_name)
-        .arg(&path)
+        .arg(&project_path)
         .spawn()
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -404,10 +632,15 @@ async fn open_in_ide(path: String, ide: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let trusted_root = TrustedRoot {
+        path: configured_trusted_root_path()
+            .expect("Invalid trusted_root in config.yaml. Update config.yaml and rebuild the app."),
+    };
+
     tauri::Builder::default()
+        .manage(trusted_root)
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())
-        .plugin(tauri_plugin_dialog::init())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Focused(focused) = event {
                 if !focused {
@@ -416,11 +649,14 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            get_launcher_config,
             get_projects,
             get_project_git_info,
             open_project,
             quit_app,
             git_fetch,
+            git_pull,
+            git_checkout,
             get_git_branches,
             open_in_tower,
             open_in_finder,
@@ -482,7 +718,7 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
-            
+
             Ok(())
         })
         .run(tauri::generate_context!())
